@@ -32,17 +32,39 @@ import { homedir } from "os";
 const OMNI_PROMPT_TOOLS_API = "omni-prompt-tools";
 const UNDERLYING_API = "openai-completions";
 
-/** Resolve Pi's models.json path; PI_HOME lets tests/custom installs point elsewhere. */
+/** Resolve the active agent's models.json path.
+ * Prime Agent uses PRIME_AGENT_CODING_AGENT_DIR (~/.prime/agent), while
+ * upstream Pi uses PI_HOME or ~/.pi/agent. Prefer Prime Agent's directory.
+ */
 function modelsJsonPath(): string {
-	return process.env.PI_HOME
-		? `${process.env.PI_HOME}/models.json`
-		: `${homedir()}/.pi/agent/models.json`;
+	const dir = process.env.PRIME_AGENT_CODING_AGENT_DIR || process.env.PI_HOME;
+	return dir
+		? `${dir.replace(/\/$/, "")}/models.json`
+		: `${homedir()}/.prime/agent/models.json`;
+}
+
+/** Ensure Prime Agent/Pi's configuration directory exists before I/O. */
+function ensureModelsDir(): void {
+	const fs = require("fs");
+	const path = require("path");
+	fs.mkdirSync(path.dirname(modelsJsonPath()), { recursive: true });
+}
+
+/** Read models.json, treating a first-run install as an empty config. */
+function readModelsConfig(): any {
+	const fs = require("fs");
+	ensureModelsDir();
+	try {
+		return JSON.parse(fs.readFileSync(modelsJsonPath(), "utf8"));
+	} catch (e: any) {
+		if (e?.code === "ENOENT") return {};
+		throw e;
+	}
 }
 
 /** Read raw models.json because custom metadata like tool_calling is not preserved by Pi's Model type. */
 function readModelsJson(): any {
-	const fs = require("fs");
-	return JSON.parse(fs.readFileSync(modelsJsonPath(), "utf8"));
+	return readModelsConfig();
 }
 
 /** Load OmniRoute base URL from models.json, falling back to local default before setup. */
@@ -74,6 +96,10 @@ function isOmniConfigured(): boolean {
 
 let OMNI_URL = getOmniUrl();
 let DASHBOARD_URL = OMNI_URL;
+// Capture Prime Agent's built-in OpenAI provider before registering `omni`.
+// Looking it up after registration can resolve back to our own streamSimple
+// handler and recurse indefinitely.
+let underlyingApiProvider: ReturnType<typeof getApiProvider> | undefined;
 
 /**
  * Register/refresh the omni provider with a custom stream handler.
@@ -89,12 +115,14 @@ function registerOmniProvider(pi: ExtensionAPI): void {
 			baseUrl: (provider.baseUrl || OMNI_URL).replace(/\/$/, ""),
 			// Pi/OpenAI SDK require a non-empty apiKey; OmniRoute may ignore this dummy for public/local setups.
 			apiKey: provider.apiKey || "omniroute-public",
-			api: OMNI_PROMPT_TOOLS_API,
+			// Prime Agent validates `api` against its built-in API registry. Keep the
+			// custom stream handler, but advertise the compatible built-in API.
+			api: UNDERLYING_API,
 			streamSimple: streamOmni,
 			models: (provider.models || []).map((model: any) => ({
 				id: model.id,
 				name: model.name || humanName(model.id),
-				api: OMNI_PROMPT_TOOLS_API,
+				api: UNDERLYING_API,
 				reasoning: model.reasoning ?? false,
 				thinkingLevelMap: model.thinkingLevelMap,
 				input: model.input || ["text"],
@@ -405,7 +433,7 @@ function streamWithPromptTools(
 				tools: [],
 			};
 
-			const provider = getApiProvider(UNDERLYING_API);
+			const provider = underlyingApiProvider;
 			if (!provider) throw new Error(`Underlying api "${UNDERLYING_API}" is not registered`);
 
 			const innerModel: Model<any> = { ...model, api: UNDERLYING_API };
@@ -478,7 +506,7 @@ function streamOmni(
 ): AssistantMessageEventStream {
 	if (shouldUsePromptTools(model)) return streamWithPromptTools(model, context, options);
 
-	const provider = getApiProvider(UNDERLYING_API);
+	const provider = underlyingApiProvider;
 	if (!provider) throw new Error(`Underlying api "${UNDERLYING_API}" is not registered`);
 	return provider.streamSimple({ ...model, api: UNDERLYING_API }, context, options);
 }
@@ -517,7 +545,7 @@ async function getAllModelsFromOmniRoute(): Promise<SyncedModel[]> {
 			id,
 			name: humanName(id),
 			owned_by: m.owned_by,
-			api: OMNI_PROMPT_TOOLS_API,
+			api: UNDERLYING_API,
 		};
 
 		if (isWebSyncedModel(id, m.name, m.owned_by, m.provider)) synced.tool_calling = false;
@@ -567,6 +595,7 @@ function humanName(id: string): string {
 
 export default function (pi: ExtensionAPI) {
 	let healthInterval: ReturnType<typeof setInterval> | undefined;
+	underlyingApiProvider = getApiProvider(UNDERLYING_API);
 	registerOmniProvider(pi);
 
 	pi.on("model_select", async (event: any, ctx: any) => {
@@ -640,7 +669,7 @@ export default function (pi: ExtensionAPI) {
 					const allModels = await getAllModelsFromOmniRoute();
 					const fs = require("fs");
 					const path = modelsJsonPath();
-					const config = JSON.parse(fs.readFileSync(path, "utf8"));
+					const config = readModelsConfig();
 
 					if (!config.providers?.omni) {
 						ctx.ui.notify(
@@ -670,6 +699,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (sub === "setup") {
 				const fs = require("fs");
+				ensureModelsDir();
 				const path = modelsJsonPath();
 
 				const urlInput = await ctx.ui.input(
@@ -707,15 +737,11 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				try {
-					let config: any = {};
-					try {
-						config = JSON.parse(fs.readFileSync(path, "utf8"));
-					} catch {}
-
+					let config: any = readModelsConfig();
 					if (!config.providers) config.providers = {};
 					config.providers.omni = {
 						baseUrl,
-						api: OMNI_PROMPT_TOOLS_API,
+						api: UNDERLYING_API,
 						apiKey: trimmedApiKey,
 						models: [],
 					};

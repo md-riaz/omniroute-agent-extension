@@ -21,6 +21,18 @@ Connect to your local or remote OmniRoute server, browse models, manage combos, 
 
 ## Installation
 
+### Prime Agent
+
+Prime Agent is a Pi-derived agent with a different configuration directory and
+stricter provider validation. This package supports both Pi and Prime Agent.
+
+```bash
+prime-agent package install git:github.com/alfred-rootson/omniroute-pi-ext-integration
+```
+
+After installation, restart Prime Agent and run `/omni setup`, then `/omni sync`.
+
+
 Install the package directly from NPM:
 
 ```bash
