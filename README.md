@@ -30,7 +30,7 @@ Prime Agent is supported through its Pi-compatible package system. Install the
 Prime-compatible fork/branch from this repository at the reviewed commit:
 
 ```bash
-prime-agent package install git:github.com/alfred-rootson/omniroute-agent-extension@d568da14bffa9281b7e6137e704a8a9812414c16
+prime-agent package install git:github.com/alfred-rootson/omniroute-agent-extension@a393c55c583236a8c900ed40f074cde21eb85231
 ```
 
 Restart Prime Agent, then run `/omni setup` followed by `/omni sync`.
