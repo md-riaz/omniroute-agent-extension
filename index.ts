@@ -34,13 +34,19 @@ const UNDERLYING_API = "openai-completions";
 
 /** Resolve the active agent's models.json path.
  * Prime Agent uses PRIME_AGENT_CODING_AGENT_DIR (~/.prime/agent), while
- * upstream Pi uses PI_HOME or ~/.pi/agent. Prefer Prime Agent's directory.
+ * upstream Pi uses PI_HOME or ~/.pi/agent. Preserve Pi's default when the
+ * launcher does not expose an explicit Prime Agent directory.
  */
 function modelsJsonPath(): string {
-	const dir = process.env.PRIME_AGENT_CODING_AGENT_DIR || process.env.PI_HOME;
-	return dir
-		? `${dir.replace(/\/$/, "")}/models.json`
-		: `${homedir()}/.prime/agent/models.json`;
+	const explicitDir = process.env.PRIME_AGENT_CODING_AGENT_DIR || process.env.PI_HOME;
+	if (explicitDir) return `${explicitDir.replace(/\/$/, "")}/models.json`;
+
+	// Prime Agent's bundled launcher path is the only reliable distinction when
+	// neither agent-specific override is set; ordinary Pi keeps ~/.pi/agent.
+	const launchedByPrime = process.argv.some((arg) => arg.includes("prime-agent"));
+	return launchedByPrime
+		? `${homedir()}/.prime/agent/models.json`
+		: `${homedir()}/.pi/agent/models.json`;
 }
 
 /** Ensure Prime Agent/Pi's configuration directory exists before I/O. */

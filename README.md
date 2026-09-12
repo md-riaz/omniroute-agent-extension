@@ -1,11 +1,14 @@
-# OmniRoute Pi Extension
+# OmniRoute Agent Extension
 
 [![npm version](https://img.shields.io/npm/v/omniroute-pi-ext-integration.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-pi-ext-integration)
 [![npm downloads](https://img.shields.io/npm/dm/omniroute-pi-ext-integration.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-pi-ext-integration)
 
-A seamless [Pi Coding Agent](https://github.com/earendil-works/pi/tree/main/packages/coding-agent) extension that brings [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — the ultimate AI gateway — directly into your editor environment.
+A shared OmniRoute integration for **Pi Coding Agent**, **Oh My Pi**, and
+**Prime Agent**. The npm package remains named `omniroute-pi-ext-integration`
+for compatibility; the GitHub repository is `omniroute-agent-extension`.
 
-Connect to your local or remote OmniRoute server, browse models, manage combos, check quotas, and intelligently route your Pi queries across 44+ LLM providers.
+Connect to a local or remote OmniRoute server, browse models, manage combos,
+check quotas, and route queries across 44+ LLM providers.
 
 ## Features
 
@@ -23,41 +26,52 @@ Connect to your local or remote OmniRoute server, browse models, manage combos, 
 
 ### Prime Agent
 
-Prime Agent is a Pi-derived agent with a different configuration directory and
-stricter provider validation. This package supports both Pi and Prime Agent.
+Prime Agent is supported through its Pi-compatible package system. Install the
+Prime-compatible fork/branch from this repository at the reviewed commit:
 
 ```bash
-prime-agent package install git:github.com/alfred-rootson/omniroute-pi-ext-integration
+prime-agent package install git:github.com/alfred-rootson/omniroute-agent-extension@d568da14bffa9281b7e6137e704a8a9812414c16
 ```
 
-After installation, restart Prime Agent and run `/omni setup`, then `/omni sync`.
+Restart Prime Agent, then run `/omni setup` followed by `/omni sync`.
+Prime Agent stores its catalog under `~/.prime/agent`; the extension creates
+that directory on first use.
 
+### Pi Coding Agent
 
-Install the package directly from NPM:
+Install the published npm package:
 
 ```bash
 pi install omniroute-pi-ext-integration
 ```
 
-Or install the latest development version directly from GitHub:
+Or install from the upstream repository:
 
 ```bash
-pi install git:github.com/md-riaz/omniroute-pi-ext-integration
+pi install git:github.com/md-riaz/omniroute-agent-extension
 ```
+
+### Oh My Pi
+
+Install the published package with Oh My Pi:
+
+```bash
+omp install omniroute-pi-ext-integration
+```
+
+Or install the upstream repository directly:
+
+```bash
+omp install git:github.com/md-riaz/omniroute-agent-extension
+```
+
 
 ## Getting Started
 
-1. **Start Pi:**
-   ```bash
-   pi
-   ```
-2. **Run Setup:** Once Pi starts, open the command palette and run:
-   ```bash
-   /omni setup
-   ```
-3. **Enter Credentials:** Enter your OmniRoute Server URL and API key when prompted. The key is collected before connectivity testing so protected `/v1/models` endpoints can be verified.
-4. **Sync Models:** Run `/omni sync` to populate the `Ctrl+P` list with all your provider models and combos.
-5. **Switch Models Normally:** Use `/model` as usual. No separate prompt-tools provider is needed.
+The `/omni` commands are available in all three supported agents. Start the
+agent you installed, run `/omni setup`, enter the OmniRoute URL and API key,
+then run `/omni sync` to populate the model picker.
+
 
 ## Prompt Tool Fallback
 
