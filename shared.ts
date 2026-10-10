@@ -238,6 +238,10 @@ async function requestJson(config: OmniConfig, path: string, init: RequestInit =
 // via a proxy), so a tight timeout reports a false "unreachable" while real
 // requests succeed. Match requestJson's 10s timeout and retry once: the first
 // attempt warms the origin, the retry then succeeds in the common case.
+export function isOmniRouteReachableHttpStatus(status: number): boolean {
+	return Number.isFinite(status) && status > 0 && status < 500;
+}
+
 async function checkHealth(agentHome: string, config: OmniConfig, context = "health"): Promise<boolean> {
 	for (let attempt = 0; attempt < 2; attempt++) {
 		const started = Date.now();
@@ -255,11 +259,20 @@ async function checkHealth(agentHome: string, config: OmniConfig, context = "hea
 			} catch {
 				// body teardown must never change the health result
 			}
-			if (res.ok) {
-				// log slow successes — the cold-start signal that once caused
-				// false "unreachable" status
-				if (ms > CONNECTION_LOG_SLOW_MS)
-					appendConnectionLog(agentHome, { event: "health", context, attempt, ok: true, ms, server: config.serverUrl });
+			if (isOmniRouteReachableHttpStatus(res.status)) {
+				// log slow successes and auth/client responses. 401/403 mean
+				// the origin answered; they are auth problems, not downtime.
+				if (ms > CONNECTION_LOG_SLOW_MS || !res.ok)
+					appendConnectionLog(agentHome, {
+						event: "health",
+						context,
+						attempt,
+						ok: true,
+						ms,
+						status: res.status,
+						server: config.serverUrl,
+						error: res.ok ? undefined : `HTTP ${res.status} (reachable)`,
+					});
 				return true;
 			}
 			appendConnectionLog(agentHome, {
@@ -530,8 +543,10 @@ async function runSetup(ctx: any, pi: OmniPI, agentHome: string): Promise<OmniCo
 		return undefined;
 	}
 
-	saveConfig(agentHome, next);
+	// 401/403 still counts as reachable. Persist only after registration
+	// succeeds so a later auth failure does not leave a half-saved setup.
 	const models = await registerOmniProvider(pi, agentHome, next);
+	saveConfig(agentHome, next);
 	;(ctx as any).modelRegistry?.refresh?.();
 	ctx.ui.notify(`Saved. Synced ${models.length} model(s).`, "info");
 	return next;

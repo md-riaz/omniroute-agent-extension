@@ -141,3 +141,7 @@ npm run smoke       # import check for omp.ts and pi.ts
 ## License
 
 MIT
+
+## Health probe
+
+`/omni` and the status bar treat the gateway as reachable when `/v1/models` returns any HTTP status below 500, including 401/403. Missing or unresolved API keys are auth problems, not downtime. A 5xx or a failed TCP/TLS/timeout after retry still reports unreachable.

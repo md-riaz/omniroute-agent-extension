@@ -193,3 +193,5 @@ import ok
 Branch `prompt-tools-web-fallback` adds prompt-emulated tool calling inside the existing OmniRoute extension.
 
 Goal: no UX change for user. `/model` works same; extension chooses tool mode internally.
+
+`isOmniRouteReachableHttpStatus` — HTTP < 500 means the OmniRoute origin answered (401/403 = auth, not down). Used by `checkHealth`.
