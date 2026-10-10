@@ -2,25 +2,26 @@
 
 ## Overview
 
-This extension is a single-file Pi extension (`index.ts`) that integrates OmniRoute with Pi Coding Agent.
+This package provides OmniRoute extensions for Pi Coding Agent, Oh My Pi, and Prime Agent. The host-specific entrypoints call the shared implementation:
 
 ```text
-Pi CLI
-  -> loads extension from package.json pi.extensions
-  -> extension registers /omni command
-  -> extension registers omni provider
-  -> user selects models with /model
-  -> streamOmni() chooses native tools or prompt tools per selected model
+pi.ts     -> createOmniExtension({ homeEnvVar: PI_CODING_AGENT_DIR, defaultHome: ~/.pi/agent })
+omp.ts    -> createOmniExtension({ homeEnvVar: OMP_HOME, defaultHome: ~/.omp/agent })
+prime.ts  -> createOmniExtension({ homeEnvVar: PRIME_AGENT_CODING_AGENT_DIR, defaultHome: ~/.prime/agent })
 ```
 
-## Data Flow: Setup
+The extension registers `/omni` commands, an `omni` provider, two model-management tools, health monitoring, and gateway telemetry.
+
+## Data flow: setup
 
 ```text
 /omni setup
   -> ask user for OmniRoute URL
   -> ask user for API key
   -> verify URL with authenticated GET /v1/models when key is present
-  -> write ~/.pi/agent/models.json
+  -> save <agent-home>/omniroute-agent-extension/config.json
+  -> discover models
+  -> write <agent-home>/models.json
   -> register/refresh omni provider
 ```
 
@@ -30,16 +31,17 @@ Saved provider shape:
 {
   "providers": {
     "omni": {
-      "baseUrl": "https://example.com",
-      "api": "omni-prompt-tools",
+      "baseUrl": "https://example.com/v1",
+      "api": "openai-completions",
       "apiKey": "...",
+      "authHeader": true,
       "models": []
     }
   }
 }
 ```
 
-## Data Flow: Sync
+## Data flow: sync
 
 ```text
 /omni sync
@@ -47,118 +49,66 @@ Saved provider shape:
   -> filter non-chat/image-only models
   -> normalize input modalities
   -> copy context/max token/reasoning metadata
-  -> mark models with -web in id/name/provider/owned_by as tool_calling:false
+  -> map OmniRoute pricing into host model cost
   -> write config.providers.omni.models
-  -> refresh Pi model registry
+  -> refresh host model registry
   -> re-register omni provider
 ```
 
+Pricing map:
 
-## Data flow: gateway telemetry
+| OmniRoute `/v1/models` field | Host model `cost` field |
+|---|---|
+| `pricing.input` | `cost.input` |
+| `pricing.output` | `cost.output` |
+| `pricing.cached` | `cost.cacheRead` |
+| `pricing.cache_creation` | `cost.cacheWrite` |
 
-After inference, the extension wraps host `fetch` for OmniRoute `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` calls. It reads `X-OmniRoute-*` headers plus `usage.tokens_per_second`, then reports routed model/provider, cost, tokens, cache state, fallbacks, and tok/s on `agent_settled`. It never derives tok/s from tokens divided by latency. Missing fields stay unavailable.
+Missing pricing fields become `0`; models without a `pricing` object keep zero cost.
 
-## Data Flow: Native Tool Model
+## Request routing
 
-```text
-Pi agent
-  -> streamOmni(model, context, options)
-  -> shouldUsePromptTools(model) === false
-  -> getApiProvider("openai-completions")
-  -> provider.streamSimple(model, context, options)
-  -> OmniRoute receives native tools
-  -> model returns native tool_calls
-  -> Pi executes tools
-```
-
-## Data Flow: Chat-Only / Prompt Tool Model
-
-```text
-Pi agent
-  -> streamOmni(model, context, options)
-  -> shouldUsePromptTools(model) === true
-  -> streamWithPromptTools(model, context, options)
-  -> renderToolProtocol(context.tools)
-  -> flattenMessages(context.messages)
-  -> call openai-completions with tools: []
-  -> parse <tool_call> blocks from full text response
-  -> emit Pi-native toolcall_* stream events
-  -> Pi executes tools
-```
-
-## Why `models.json` Is Re-read
-
-Pi parses configured models into runtime `Model` objects. Its schema keeps supported fields like:
-
-```text
-id, name, api, provider, baseUrl, reasoning, input, contextWindow, maxTokens, compat
-```
-
-Custom synced fields like this are not preserved:
-
-```json
-"tool_calling": false
-```
-
-So `modelConfigToolCallingFalse()` reads raw `models.json` to recover that field at request time.
-
-## Tool Mode Algorithm
+All synced models use the host's built-in OpenAI-compatible provider:
 
 ```ts
-promptTools =
-  modelConfigToolCallingFalse(model) ||
-  id/name/provider contains "-web" ||
-  synced raw owned_by/provider marker contained "-web"
+const PROVIDER_API = "openai-completions";
 ```
 
-If `promptTools` is false, native OpenAI-compatible tool calling is used.
+The extension does not proxy or rewrite chat requests. The host sends requests directly to OmniRoute, so native SSE streaming and native `tool_calls` stay intact.
 
-## Prompt Tool Design
+## Gateway telemetry
 
-Prompt mode uses this text protocol:
+After inference, the extension wraps host `fetch` for OmniRoute `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` calls.
 
-```xml
-<tool_call>
-{"name":"tool_name","arguments":{}}
-</tool_call>
-```
+It captures:
 
-Why XML-like tags:
+- `X-OmniRoute-*` headers from non-streaming responses
+- `usage.tokens_per_second` from JSON bodies
+- final SSE `usage.tokens_per_second` from streaming responses
+- routed model/provider, cost, token counts, cache state, and fallback count when OmniRoute emits them
 
-- easier to parse than arbitrary JSON in prose
-- allows normal answer text before tool call
-- supports multiple tool calls
-- can replay history using same structure
+The stream wrapper passes chunks through unchanged. It never derives tok/s from tokens divided by latency; missing gateway tok/s stays unavailable.
 
-## Stream Event Conversion
+## Model persistence
 
-`streamWithPromptTools()` builds an `AssistantMessage` manually and pushes event stream entries:
+`persistModelsJson()` preserves existing `models.json` content and replaces only `providers[providerName]`. Legacy catalog entries from earlier Pi-only releases are normalized to `openai-completions` on load.
+
+## Health checks
+
+`checkHealth()` probes `/v1/models` with the configured API key. HTTP responses below 500 count as reachable because 401/403 are auth/setup problems, not network downtime. Transport errors and 5xx responses are logged to `<agent-home>/omniroute-agent-extension/connection.log`.
+
+## Auto models
+
+The extension prepends OmniRoute virtual model IDs unless `/v1/models` already returns them:
 
 ```text
-start
-text_start/text_delta/text_end       if prose exists
-toolcall_start/toolcall_delta/toolcall_end for each parsed call
-done(reason: "toolUse" | "stop")
+auto
+auto/coding
+auto/fast
+auto/cheap
+auto/offline
+auto/smart
+auto/lkgp
 ```
 
-This makes Pi's normal agent loop execute tools, even though upstream model only wrote text.
-
-## Known Trade-offs
-
-- Prompt mode is buffered: it waits for full model output before parsing tool calls.
-- Images in history/tool results are dropped in prompt mode.
-- Small models may emit malformed JSON; parse errors are returned as visible assistant text so the model can self-correct next turn.
-- Prompt tool calls are only as reliable as model instruction following.
-
-## API Key Handling
-
-`/omni setup` asks for the API key before testing `/v1/models` because protected remote OmniRoute deployments can require Authorization even for model listing. The key may still be blank for local/public deployments. Pi's provider registry and OpenAI-compatible SDK path require a non-empty API key string when registering custom models, so provider registration uses a harmless dummy value (`omniroute-public`) only when the saved key is empty. Real OmniRoute requests use the saved key when present.
-
-## Extension Boundaries
-
-This repo does not implement OmniRoute itself. It only:
-
-- calls OmniRoute `/v1/models`
-- routes chat completions through Pi's built-in `openai-completions` provider
-- stores Pi config in `models.json`
-- registers Pi commands/provider
+OmniRoute resolves these server-side.

@@ -2,36 +2,35 @@
 
 This file is the first stop for AI agents. Read this before scanning the repo.
 
-## Repository Purpose
+## Repository purpose
 
 `omniroute-agent-extension` is an OmniRoute extension for Pi Coding Agent, Oh My Pi, and Prime Agent.
 
-It does three jobs:
+It does four jobs:
 
 1. `/omni setup` saves OmniRoute URL/API key into the selected agent home and tests protected endpoints with the entered key.
-2. `/omni sync` fetches OmniRoute `/v1/models` and syncs them into the host `/model` picker.
-3. The extension registers an `omni` provider that routes tool calling automatically:
-   - native tool-capable models use OpenAI-compatible native `tool_calls`
-   - chat-only models use prompt-emulated tools via `<tool_call>` blocks
+2. `/omni sync` fetches OmniRoute `/v1/models` and syncs models into the host `/model` picker.
+3. The extension registers one `omni` provider that routes through the host's built-in `openai-completions` handler.
+4. Gateway telemetry reports OmniRoute tok/s, cost, token counts, cache state, and routed model/provider when the gateway emits them.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `shared.ts` | Shared extension implementation. Commands, sync, provider registration, prompt-tool fallback, health checks. |
+| `shared.ts` | Shared implementation: commands, sync, pricing map, provider registration, health checks, connection log. |
 | `omp.ts` | Oh My Pi entrypoint. Uses `OMP_HOME` / `~/.omp/agent`. |
 | `pi.ts` | Pi Coding Agent entrypoint. Uses `PI_CODING_AGENT_DIR` / `~/.pi/agent`. |
 | `prime.ts` | Prime Agent entrypoint. Uses `PRIME_AGENT_CODING_AGENT_DIR` / `~/.prime/agent`. |
-| `telemetry.ts` | Gateway tok/s, cost, routed model/provider parsing. Never invents tok/s from latency. |
+| `telemetry.ts` | Gateway telemetry parsing for headers, JSON bodies, and final streaming SSE usage. Never invents tok/s from latency. |
+| `test/shared.test.ts` | Shared extension tests. |
+| `test/telemetry.test.ts` | Telemetry parser and streaming capture tests. |
 | `README.md` | User-facing install/setup/usage docs. |
-| `package.json` | Pi extension metadata, scripts, dev deps. |
-| `package-lock.json` | Locked npm dependency tree. |
+| `ARCHITECTURE.md` | Data flow and routing docs. |
 | `AGENTS.md` | Mandatory instructions for AI agents editing this repo. |
-| `ARCHITECTURE.md` | Detailed data flow and prompt-tool architecture. |
-| `CONTRIBUTING.md` | Dev workflow, test checklist, and contribution rules. |
-| `LICENSE` | MIT license. |
+| `CONTRIBUTING.md` | Dev workflow and contribution rules. |
+| `package.json` | Package metadata, host manifests, scripts. |
 
-## Key Concepts
+## Key concepts
 
 ### Provider name
 
@@ -41,161 +40,121 @@ The host provider is always:
 omni
 ```
 
-Users keep switching models normally:
+Users switch models normally:
 
 ```text
-/model cgpt-web/gpt-5.4-pro
-/model codex/gpt-5.2
+/model cx/gpt-5.5
+/model auto/coding
 ```
 
-Do not create a second prompt-tools provider unless explicitly requested.
+Do not create duplicate providers unless explicitly asked.
 
-### Custom API id
+### Provider API
 
-The extension registers a synthetic API id:
+All synced models register with:
 
 ```ts
-const OMNI_PROMPT_TOOLS_API = "omni-prompt-tools";
+const PROVIDER_API = "openai-completions";
 ```
 
-That custom API routes through `streamOmni()`.
+The extension does not proxy chat requests. The host sends requests directly to OmniRoute, preserving native SSE streaming and native `tool_calls`.
 
-### Underlying API
+### Prime Agent manifest behavior
 
-Real HTTP calls still use Pi's built-in OpenAI-compatible provider:
+Prime Agent currently reads the Pi-compatible manifest path. `prime.ts` is included under `pi.extensions` in `package.json`. Do not add a separate top-level `prime` manifest key unless real Prime runtime behavior or docs require it.
 
-```ts
-const UNDERLYING_API = "openai-completions";
-```
-
-Native mode passes tools normally. Prompt mode strips native tools and renders tool schemas as text.
-
-## Tool Mode Decision
-
-Entry point:
-
-```ts
-shouldUsePromptTools(model)
-```
-
-Prompt tool mode triggers when:
-
-1. raw `models.json` says the selected model has:
-
-```json
-"tool_calling": false
-```
-
-2. or model id/name/provider/OmniRoute `owned_by` contains:
-
-```text
--web
-```
-
-Reason: Pi's runtime `Model` type does not preserve custom fields like `tool_calling`, so the extension re-reads raw `models.json` in `modelConfigToolCallingFalse()`.
-
-## Important Functions In `index.ts`
+## Important functions in `shared.ts`
 
 Read in this order:
 
-1. `registerOmniProvider()` — registers/refreshes the `omni` provider and model list.
-2. `streamOmni()` — runtime router for native vs prompt tool mode.
-3. `shouldUsePromptTools()` — decides if prompt tool fallback is needed.
-4. `streamWithPromptTools()` — prompt-tool stream implementation.
-5. `renderToolProtocol()` — converts Pi tool schemas into prompt text.
-6. `flattenMessages()` — converts native tool history into text history for chat-only models.
-7. `parseToolCalls()` — parses `<tool_call>` blocks from model output.
-8. `getAllModelsFromOmniRoute()` — fetches `/v1/models` and converts to Pi model entries.
-9. `humanName()` — user-friendly labels for Ctrl+P.
+1. `createOmniExtension()` — entrypoint used by `pi.ts`, `omp.ts`, and `prime.ts`.
+2. `runSetup()` — setup flow, health probe, provider registration, config save.
+3. `fetchSyncedModels()` — fetches `/v1/models`, filters chat-capable models, maps metadata and pricing.
+4. `normalizeCost()` — maps OmniRoute `pricing` into host model `cost`.
+5. `discoverModels()` — combines auto models with synced models.
+6. `buildProviderModelConfig()` — converts a synced model into host provider config.
+7. `persistModelsJson()` — updates only `providers[providerName]` in `models.json`.
+8. `reloadProviderFromModelsJson()` — loads saved catalog and normalizes legacy API identifiers.
+9. `checkHealth()` / `isOmniRouteReachableHttpStatus()` — treat HTTP `< 500` as reachable.
 
-## Prompt Tool Wire Format
+## Pricing mapping
 
-The chat-only model is instructed to emit:
+OmniRoute `/v1/models` pricing uses USD per million tokens. The host cost object uses the same units.
 
-```xml
-<tool_call>
-{"name":"read","arguments":{"path":"index.ts"}}
-</tool_call>
-```
+| OmniRoute field | Host cost field |
+|---|---|
+| `pricing.input` | `cost.input` |
+| `pricing.output` | `cost.output` |
+| `pricing.cached` | `cost.cacheRead` |
+| `pricing.cache_creation` | `cost.cacheWrite` |
 
-Tool results are replayed in history as:
+Missing fields become `0`; missing `pricing` keeps the zero-cost fallback.
 
-```xml
-<tool_result tool="read" id="call_123">
-...tool output...
-</tool_result>
-```
+## Gateway telemetry
 
-`streamWithPromptTools()` parses these text blocks and emits Pi native `toolcall_*` stream events so Pi executes tools normally.
+`telemetry.ts` wraps host `fetch` only for configured OmniRoute inference URLs:
 
-## Common Change Requests
+- `/v1/chat/completions`
+- `/v1/responses`
+- `/v1/messages`
 
-### Add a new model detection rule
+It reads telemetry from:
 
-Update:
+- `X-OmniRoute-*` response headers
+- JSON `usage.tokens_per_second`
+- final streaming SSE `usage.tokens_per_second`
 
-```ts
-shouldUsePromptTools()
-```
+Never calculate tok/s from latency. OmniRoute owns that measurement.
 
-Keep `modelConfigToolCallingFalse()` because raw `models.json` metadata is important.
+## Common change requests
 
 ### Change OmniRoute sync metadata
-
-Update:
-
-```ts
-getAllModelsFromOmniRoute()
-SyncedModel
-```
-
-Then update README example model JSON if user-visible.
-
-### Change prompt tool format
 
 Update together:
 
 ```ts
-renderToolProtocol()
-TOOL_CALL_RE
-renderToolCallBlock()
-parseToolCalls()
-README.md
+OmniApiModel
+SyncedModel
+fetchSyncedModels()
+buildProviderModelConfig()
 ```
+
+Add or update `test/shared.test.ts`.
+
+### Change pricing behavior
+
+Update `normalizeCost()` and the sync test. Keep negative, missing, and non-finite values from leaking into model config.
 
 ### Change setup behavior
 
-Update `/omni setup` handler near bottom of `index.ts`. Preserve the current order: ask for API key before testing `/v1/models`, because protected OmniRoute servers may require Authorization for model listing.
+Update `runSetup()`. Preserve the current order: verify/register first, then save config. Protected OmniRoute servers may require Authorization for `/v1/models`.
 
-### Change sync behavior
+### Change telemetry behavior
 
-Update `/omni sync` handler and `getAllModelsFromOmniRoute()`.
+Update `telemetry.ts` and `test/telemetry.test.ts`. For streaming, prove the response body still reaches the caller unchanged.
 
-## Test Commands
+## Test commands
 
 ```bash
+npm test
 npm run typecheck
 npm run smoke
+npm pack --dry-run
 ```
 
 Expected smoke output:
 
 ```text
-import ok
+omp ok
+pi ok
+prime ok
 ```
 
 ## Pitfalls
 
-- Do not rely only on Pi runtime `Model` for `tool_calling`; custom fields and OmniRoute `owned_by` are stripped.
-- Do not set web/chat-only models to a separate provider; keep `/model` workflow unchanged.
-- Do not send native `tools` to chat-only web-synced models; use prompt mode with `tools: []`.
-- `streamWithPromptTools()` is buffered, not token-streamed. It waits for full response so it can parse tool blocks safely.
-- Prompt mode drops non-text content in history because chat-only OpenAI-compatible endpoints here are treated as text-first.
-
-## Current Branch Intent
-
-Branch `prompt-tools-web-fallback` adds prompt-emulated tool calling inside the existing OmniRoute extension.
-
-Goal: no UX change for user. `/model` works same; extension chooses tool mode internally.
-
-`isOmniRouteReachableHttpStatus` — HTTP < 500 means the OmniRoute origin answered (401/403 = auth, not down). Used by `checkHealth`.
+- Do not reintroduce the old `index.ts` single-entry architecture.
+- Do not revive prompt-emulated tool routing unless explicitly asked; current routing uses host-native `openai-completions`.
+- Do not put `omp.ts` under `pi.extensions`; OMP belongs under `omp.extensions`.
+- Do not remove Prime support when porting old PRs.
+- Do not derive tok/s locally from latency.
+- Do not overwrite the whole docs from stale PR branches; preserve current Pi/OMP/Prime and telemetry docs.

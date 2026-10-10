@@ -11,7 +11,8 @@ Connect to your local or remote OmniRoute server and route queries across 44+ LL
 
 - **Wizard-based setup** — `/omni setup` inside `pi`, `omp`, or Prime Agent. No manual JSON editing.
 - **Multi-CLI support** — one package, identical feature set for `pi`, `omp`, and Prime Agent.
-- **Model sync** — push all OmniRoute models into the `Ctrl+P` / `/model` picker with full metadata: context windows, max tokens, reasoning, and vision capabilities.
+- **Model sync** — push all OmniRoute models into the `Ctrl+P` / `/model` picker with full metadata: context windows, max tokens, reasoning, vision capabilities, and per-model cost.
+- **Cost tracking** — OmniRoute `pricing` values from `/v1/models` are written into host model `cost`, so priced models no longer show as `$0`.
 - **Native tool calls** — the host's built-in `openai-completions` handler runs every request, so you get real SSE streaming and native `tool_calls` for all models.
 - **Smart sorting** — models grouped by provider prefix, auto-routing models (`auto`, `auto/coding`, etc.) always first.
 - **Gateway telemetry** — after each turn, surface OmniRoute-resolved tok/s, cost, and routed model/provider when the gateway sends them. tok/s is never computed as tokens/latency. Missing values stay unavailable until OmniRoute emits them.
