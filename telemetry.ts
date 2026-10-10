@@ -115,6 +115,63 @@ export type WrapFetchCaptureOptions = {
   serverUrl?: string | (() => string | undefined);
 };
 
+function mergeTelemetry(base: GatewayTelemetry, next: GatewayTelemetry): GatewayTelemetry {
+  return { ...base, ...Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined)) };
+}
+
+function parseSseCommentHeaders(line: string): Headers | undefined {
+  const match = /^:\s*([^=:\s]+)=(.*)$/.exec(line);
+  if (!match || !match[1].toLowerCase().startsWith("x-omniroute-")) return undefined;
+  return new Headers({ [match[1]]: match[2].trim() });
+}
+
+function parseStreamingTelemetry(headers: Headers, text: string): GatewayTelemetry {
+  let telemetry = parseGatewayTelemetry(headers, {});
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    const commentHeaders = parseSseCommentHeaders(line);
+    if (commentHeaders) {
+      telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(commentHeaders, {}));
+      continue;
+    }
+    if (!line.startsWith("data:")) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") continue;
+    try {
+      telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(headers, JSON.parse(data)));
+    } catch {
+      // Ignore partial or non-JSON SSE payloads. The stream must pass through untouched.
+    }
+  }
+  return telemetry;
+}
+
+function captureStreamingResponse(response: Response, onCapture: (t: GatewayTelemetry) => void): Response {
+  if (!response.body) {
+    onCapture(parseGatewayTelemetry(response.headers, {}));
+    return response;
+  }
+
+  const decoder = new TextDecoder();
+  let text = "";
+  const stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      text += decoder.decode(chunk, { stream: true });
+      controller.enqueue(chunk);
+    },
+    flush() {
+      text += decoder.decode();
+      onCapture(parseStreamingTelemetry(response.headers, text));
+    },
+  }));
+
+  return new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 export function wrapFetchCaptureTelemetry(
   fetchImpl: typeof fetch,
   onCapture: (t: GatewayTelemetry) => void,
@@ -125,6 +182,9 @@ export function wrapFetchCaptureTelemetry(
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     const serverUrl = typeof options?.serverUrl === "function" ? options.serverUrl() : options?.serverUrl;
     if (INFERENCE_PATH.test(url) && isOmniRouteUrl(url, serverUrl)) {
+      const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+      if (contentType.includes("text/event-stream")) return captureStreamingResponse(response, onCapture);
+
       let body: unknown;
       try {
         body = await response.clone().json();

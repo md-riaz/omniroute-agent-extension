@@ -78,3 +78,22 @@ test("fetch wrapper skips capture when serverUrl is unset", async () => {
   await wrapped("https://omniroute.example/v1/chat/completions");
   assert.deepEqual(seen, []);
 });
+
+test("fetch wrapper captures final streaming usage without consuming the stream", async () => {
+  const seen: Array<{ tokensPerSecond?: number; model?: string; tokensIn?: number; tokensOut?: number }> = [];
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+    "data: {\"model\":\"stream-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"tokens_per_second\":19.75}}\n\n",
+    "data: [DONE]\n\n",
+  ].join("");
+  const inner = (async () => new Response(sse, { headers: { "content-type": "text/event-stream" } })) as typeof fetch;
+  const wrapped = wrapFetchCaptureTelemetry(inner, (t) => { seen.push(t); }, { serverUrl: "https://omniroute.example" });
+
+  const res = await wrapped("https://omniroute.example/v1/chat/completions");
+  assert.equal(await res.text(), sse);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].tokensPerSecond, 19.75);
+  assert.equal(seen[0].model, "stream-model");
+  assert.equal(seen[0].tokensIn, 3);
+  assert.equal(seen[0].tokensOut, 2);
+});
