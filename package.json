@@ -1,10 +1,11 @@
 {
   "name": "omniroute-agent-extension",
   "version": "3.1.0",
-  "description": "OmniRoute extension for Pi Coding Agent (pi) and Oh My Pi (omp) — model sync, health checks, and native host routing",
+  "description": "OmniRoute extension for Pi Coding Agent, Oh My Pi, and Prime Agent with model sync, health checks, and native host routing",
   "keywords": [
     "omp-plugin",
     "oh-my-pi",
+    "prime-agent",
     "pi-package",
     "pi-coding-agent",
     "omniroute",
@@ -17,6 +18,7 @@
     "shared.ts",
     "omp.ts",
     "pi.ts",
+    "prime.ts",
     "README.md",
     "LICENSE"
   ],
@@ -27,13 +29,14 @@
   },
   "pi": {
     "extensions": [
-      "./pi.ts"
+      "./pi.ts",
+      "./prime.ts"
     ]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "smoke": "node --experimental-strip-types -e \"import('./omp.ts').then(()=>console.log('omp ok')).catch(e=>{console.error(e);process.exit(1)})\" && node --experimental-strip-types -e \"import('./pi.ts').then(()=>console.log('pi ok')).catch(e=>{console.error(e);process.exit(1)})\""
+    "smoke": "node --experimental-strip-types -e \"import('./omp.ts').then(()=>console.log('omp ok')).catch(e=>{console.error(e);process.exit(1)})\" && node --experimental-strip-types -e \"import('./pi.ts').then(()=>console.log('pi ok')).catch(e=>{console.error(e);process.exit(1)})\" && node --experimental-strip-types -e \"import('./prime.ts').then(()=>console.log('prime ok')).catch(e=>{console.error(e);process.exit(1)})\""
   },
   "author": "md-riaz",
   "license": "MIT",

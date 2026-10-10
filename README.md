@@ -3,14 +3,14 @@
 [![npm version](https://img.shields.io/npm/v/omniroute-agent-extension.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-agent-extension)
 [![npm downloads](https://img.shields.io/npm/dm/omniroute-agent-extension.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-agent-extension)
 
-OmniRoute extension for [Pi Coding Agent](https://pi.dev) (`pi`) and [Oh My Pi](https://omp.sh) (`omp`).
+OmniRoute extension for [Pi Coding Agent](https://pi.dev) (`pi`), [Oh My Pi](https://omp.sh) (`omp`), and Prime Agent.
 
 Connect to your local or remote OmniRoute server and route queries across 44+ LLM providers directly from your agent CLI.
 
 ## Features
 
-- **Wizard-based setup** — `/omni setup` inside `pi` or `omp`. No manual JSON editing.
-- **Dual CLI support** — one package, identical feature set for both `pi` and `omp`.
+- **Wizard-based setup** — `/omni setup` inside `pi`, `omp`, or Prime Agent. No manual JSON editing.
+- **Multi-CLI support** — one package, identical feature set for `pi`, `omp`, and Prime Agent.
 - **Model sync** — push all OmniRoute models into the `Ctrl+P` / `/model` picker with full metadata: context windows, max tokens, reasoning, and vision capabilities.
 - **Native tool calls** — the host's built-in `openai-completions` handler runs every request, so you get real SSE streaming and native `tool_calls` for all models.
 - **Smart sorting** — models grouped by provider prefix, auto-routing models (`auto`, `auto/coding`, etc.) always first.
@@ -40,11 +40,19 @@ pi install omniroute-agent-extension
 pi install git:github.com/md-riaz/omniroute-agent-extension
 ```
 
+**Prime Agent:**
+
+```bash
+prime-agent package install git:github.com/md-riaz/omniroute-agent-extension
+```
+
+Prime Agent uses `PRIME_AGENT_CODING_AGENT_DIR` when set, otherwise `~/.prime/agent`.
+
 When replacing the earlier Pi-only `omniroute-pi-ext-integration`, existing `omni` catalog entries are normalized automatically on first load. Run `/omni sync` afterward to refresh the catalog from the server.
 
 ## Getting Started
 
-1. Start your CLI (`pi` or `omp`)
+1. Start your CLI (`pi`, `omp`, or Prime Agent)
 2. Run `/omni setup` — enter your OmniRoute server URL and API key
 3. Run `/omni sync` — populates the `Ctrl+P` / `/model` picker
 4. Select any model with `/model` and start chatting
@@ -55,8 +63,9 @@ Config is saved to:
 |---|---|
 | `omp` | `~/.omp/agent/omniroute-agent-extension/config.json` |
 | `pi` | `~/.pi/agent/omniroute-agent-extension/config.json` |
+| Prime Agent | `~/.prime/agent/omniroute-agent-extension/config.json` |
 
-Synced models are written to `~/.omp/agent/models.json` (or `~/.pi/agent/models.json`) and reloaded on startup without a network call.
+Synced models are written to `~/.omp/agent/models.json`, `~/.pi/agent/models.json`, or `~/.prime/agent/models.json` and reloaded on startup without a network call.
 
 ## Commands
 
@@ -119,13 +128,14 @@ npm run smoke       # import check for omp.ts and pi.ts
 
 | File | Purpose |
 |---|---|
-| `shared.ts` | All business logic — no host package imports; works in both `pi` and `omp` |
+| `shared.ts` | All business logic — no host package imports; works in `pi`, `omp`, and Prime Agent |
 | `omp.ts` | Oh My Pi entry point — `OMP_HOME` / `~/.omp/agent` |
 | `pi.ts` | Pi Coding Agent entry point — `PI_CODING_AGENT_DIR` / `~/.pi/agent` |
+| `prime.ts` | Prime Agent entry point — `PRIME_AGENT_CODING_AGENT_DIR` / `~/.prime/agent` |
 
 ## Requirements
 
-- `omp` ([`@oh-my-pi/pi-coding-agent`](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)) v15.9.0+ **or** `pi` ([`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)) v0.60.0+
+- `omp` ([`@oh-my-pi/pi-coding-agent`](https://www.npmjs.com/package/@oh-my-pi/pi-coding-agent)) v15.9.0+, `pi` ([`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)) v0.60.0+, or Prime Agent
 - [OmniRoute](https://github.com/diegosouzapw/OmniRoute) — any version exposing `/v1/models` and `/v1/chat/completions`
 
 ## License

@@ -117,3 +117,44 @@ test("expands a leading ~ in the agent-home env var", async () => {
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("prime agent entrypoint uses PRIME_AGENT_CODING_AGENT_DIR", async () => {
+  const agentHome = mkdtempSync(join(tmpdir(), "omniroute-prime-home-"));
+  const previousHome = process.env.PRIME_AGENT_CODING_AGENT_DIR;
+  process.env.PRIME_AGENT_CODING_AGENT_DIR = agentHome;
+
+  const registrations: Array<{ name: string; config: any }> = [];
+  const pi = {
+    registerProvider(name: string, config: any) {
+      registrations.push({ name, config });
+    },
+    registerTool() {},
+    registerCommand() {},
+    on() {},
+  };
+
+  try {
+    writeFileSync(
+      join(agentHome, "models.json"),
+      JSON.stringify({
+        providers: {
+          omni: {
+            baseUrl: "http://127.0.0.1:20128/v1",
+            apiKey: "",
+            models: [{ id: "prime-test", name: "Prime Test" }],
+          },
+        },
+      }),
+    );
+
+    const mod = await import(`../prime.ts?case=${Date.now()}`);
+    await mod.default(pi);
+
+    assert.equal(registrations.length, 1);
+    assert.equal(registrations[0].config.models[0].id, "prime-test");
+  } finally {
+    if (previousHome === undefined) delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+    else process.env.PRIME_AGENT_CODING_AGENT_DIR = previousHome;
+    rmSync(agentHome, { recursive: true, force: true });
+  }
+});
