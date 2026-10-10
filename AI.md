@@ -4,12 +4,12 @@ This file is the first stop for AI agents. Read this before scanning the repo.
 
 ## Repository Purpose
 
-`omniroute-pi-ext-integration` is a Pi Coding Agent extension for OmniRoute.
+`omniroute-agent-extension` is an OmniRoute extension for Pi Coding Agent, Oh My Pi, and Prime Agent.
 
 It does three jobs:
 
-1. `/omni setup` saves OmniRoute URL/API key into Pi `models.json` and tests protected endpoints with the entered key.
-2. `/omni sync` fetches OmniRoute `/v1/models` and syncs them into Pi's `/model` picker.
+1. `/omni setup` saves OmniRoute URL/API key into the selected agent home and tests protected endpoints with the entered key.
+2. `/omni sync` fetches OmniRoute `/v1/models` and syncs them into the host `/model` picker.
 3. The extension registers an `omni` provider that routes tool calling automatically:
    - native tool-capable models use OpenAI-compatible native `tool_calls`
    - chat-only models use prompt-emulated tools via `<tool_call>` blocks
@@ -18,7 +18,11 @@ It does three jobs:
 
 | Path | Purpose |
 |---|---|
-| `index.ts` | Entire extension implementation. Commands, sync, provider registration, prompt-tool fallback. |
+| `shared.ts` | Shared extension implementation. Commands, sync, provider registration, prompt-tool fallback, health checks. |
+| `omp.ts` | Oh My Pi entrypoint. Uses `OMP_HOME` / `~/.omp/agent`. |
+| `pi.ts` | Pi Coding Agent entrypoint. Uses `PI_CODING_AGENT_DIR` / `~/.pi/agent`. |
+| `prime.ts` | Prime Agent entrypoint. Uses `PRIME_AGENT_CODING_AGENT_DIR` / `~/.prime/agent`. |
+| `telemetry.ts` | Gateway tok/s, cost, routed model/provider parsing. Never invents tok/s from latency. |
 | `README.md` | User-facing install/setup/usage docs. |
 | `package.json` | Pi extension metadata, scripts, dev deps. |
 | `package-lock.json` | Locked npm dependency tree. |
@@ -31,7 +35,7 @@ It does three jobs:
 
 ### Provider name
 
-The Pi provider is always:
+The host provider is always:
 
 ```text
 omni

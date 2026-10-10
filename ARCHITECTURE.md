@@ -53,6 +53,11 @@ Saved provider shape:
   -> re-register omni provider
 ```
 
+
+## Data flow: gateway telemetry
+
+After inference, the extension wraps host `fetch` for OmniRoute `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` calls. It reads `X-OmniRoute-*` headers plus `usage.tokens_per_second`, then reports routed model/provider, cost, tokens, cache state, fallbacks, and tok/s on `agent_settled`. It never derives tok/s from tokens divided by latency. Missing fields stay unavailable.
+
 ## Data Flow: Native Tool Model
 
 ```text
