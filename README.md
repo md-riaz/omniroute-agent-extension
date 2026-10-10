@@ -12,6 +12,7 @@ Connect to your local or remote OmniRoute server and route queries across 44+ LL
 - **Wizard-based setup** — `/omni setup` inside `pi`, `omp`, or Prime Agent. No manual JSON editing.
 - **Multi-CLI support** — one package, identical feature set for `pi`, `omp`, and Prime Agent.
 - **Model sync** — push all OmniRoute models into the `Ctrl+P` / `/model` picker with full metadata: context windows, max tokens, reasoning, vision capabilities, and per-model cost.
+- **Catalog autosync** — one quiet sync runs when a configured session starts. Repeating background sync is off by default and can be enabled with `/omni autosync on` for a 60-minute interval, with a 5-minute minimum.
 - **Cost tracking** — OmniRoute `pricing` values from `/v1/models` are written into host model `cost`, so priced models no longer show as `$0`.
 - **Native tool calls** — the host's built-in `openai-completions` handler runs every request, so you get real SSE streaming and native `tool_calls` for all models.
 - **Smart sorting** — models grouped by provider prefix, auto-routing models (`auto`, `auto/coding`, etc.) always first.
@@ -57,7 +58,8 @@ When replacing the earlier Pi-only `omniroute-pi-ext-integration`, existing `omn
 1. Start your CLI (`pi`, `omp`, or Prime Agent)
 2. Run `/omni setup` — enter your OmniRoute server URL and API key
 3. Run `/omni sync` — populates the `Ctrl+P` / `/model` picker
-4. Select any model with `/model` and start chatting
+4. Optional: run `/omni autosync on` to refresh the catalog every 60 minutes while the agent is running
+5. Select any model with `/model` and start chatting
 
 Config is saved to:
 
@@ -81,7 +83,30 @@ Synced models are written to `~/.omp/agent/models.json`, `~/.pi/agent/models.jso
 | `/omni test <model>` | Smoke-test `/v1/chat/completions` with a specific model |
 | `/omni dashboard` | Show the OmniRoute dashboard URL |
 | `/omni config` | Show config, models.json, and connection log paths with current settings |
+| `/omni autosync [status\|on\|off\|<minutes>]` | View or change background catalog autosync. `on` means every 60 minutes; minimum accepted interval is 5 minutes. |
 | `/omni help` | Show command list |
+
+## Catalog autosync
+
+After setup, every configured session does one quiet startup sync after OmniRoute health passes. This refreshes the model picker once without showing a success toast.
+
+Repeating background autosync is off by default because OmniRoute catalogs do not change often. Use these commands when you want it:
+
+```text
+/omni autosync status   # show current setting and whether the timer is active
+/omni autosync on       # enable every 60 minutes
+/omni autosync off      # disable repeating autosync
+/omni autosync 30       # set every 30 minutes
+/omni autosync 2h       # set every 120 minutes
+```
+
+Rules:
+
+- Values are minutes unless suffixed with `h`.
+- Minimum repeating interval is 5 minutes; lower non-zero values clamp to 5.
+- `0` or `off` disables the repeating timer.
+- Manual `/omni sync` always works, even when repeating autosync is off.
+- `OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES` overrides the saved setting.
 
 ## Agent Tools
 
@@ -118,6 +143,7 @@ auto/cheap   auto/offline   auto/smart   auto/lkgp
 | `OMNIROUTE_URL` | OmniRoute server base URL |
 | `OMNIROUTE_API_KEY` | API key |
 | `OMNIROUTE_PROVIDER_NAME` | Provider name shown in the picker (default: `omni`) |
+| `OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES` | Optional background catalog sync interval in minutes. `0` disables repeating autosync; values from `1` to `4` clamp to `5`. |
 
 When any of these are set, `/omni setup` is not required.
 

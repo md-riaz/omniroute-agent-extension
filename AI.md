@@ -9,7 +9,7 @@ This file is the first stop for AI agents. Read this before scanning the repo.
 It does four jobs:
 
 1. `/omni setup` saves OmniRoute URL/API key into the selected agent home and tests protected endpoints with the entered key.
-2. `/omni sync` fetches OmniRoute `/v1/models` and syncs models into the host `/model` picker.
+2. `/omni sync` fetches OmniRoute `/v1/models` and syncs models into the host `/model` picker. Configured sessions also perform one quiet sync on startup; repeating autosync is off unless the user enables it.
 3. The extension registers one `omni` provider that routes through the host's built-in `openai-completions` handler.
 4. Gateway telemetry reports OmniRoute tok/s, cost, token counts, cache state, and routed model/provider when the gateway emits them.
 
@@ -76,6 +76,18 @@ Read in this order:
 7. `persistModelsJson()` — updates only `providers[providerName]` in `models.json`.
 8. `reloadProviderFromModelsJson()` — loads saved catalog and normalizes legacy API identifiers.
 9. `checkHealth()` / `isOmniRouteReachableHttpStatus()` — treat HTTP `< 500` as reachable.
+
+## Catalog autosync
+
+Autosync behavior lives in `createOmniExtension()`:
+
+- On `session_start`, after a successful health probe, run one quiet sync for configured agents.
+- Repeating autosync is controlled by `autoSyncIntervalMinutes` and defaults to `0` (off).
+- `/omni autosync on` sets `60` minutes.
+- `/omni autosync <number>` treats the number as minutes; `<Nm>` and `<Nh>` are accepted.
+- Minimum repeat interval is 5 minutes; lower non-zero values clamp to 5.
+- `OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES` overrides config.
+- Always clear interval timers on `session_shutdown`; do not leak duplicate timers across sessions.
 
 ## Pricing mapping
 

@@ -66,6 +66,29 @@ Pricing map:
 
 Missing pricing fields become `0`; models without a `pricing` object keep zero cost.
 
+## Catalog autosync
+
+Configured sessions perform one quiet catalog sync on `session_start` after the `/v1/models` health probe succeeds. This keeps the picker fresh once per session without requiring a manual `/omni sync` every time.
+
+Repeating background autosync is off by default:
+
+```json
+{
+  "autoSyncIntervalMinutes": 0
+}
+```
+
+Users can enable or tune it with `/omni autosync`:
+
+- `/omni autosync status` shows the current setting and whether the interval timer is active.
+- `/omni autosync on` enables a 60-minute interval.
+- `/omni autosync off` disables the repeating timer. Manual `/omni sync` still works.
+- `/omni autosync 30` or `/omni autosync 2h` sets the interval in minutes or hours.
+
+Intervals below 5 minutes clamp to 5 minutes. The implementation stores minutes in config and converts to milliseconds only for `setInterval()`. `session_shutdown` clears the timer so repeated sessions do not leak duplicate intervals. A new `session_start` stops any previous autosync timer before creating a new one.
+
+The quiet startup sync does not depend on the repeating timer setting; `autoSyncIntervalMinutes: 0` means “do the startup sync, but do not keep syncing in the background.”
+
 ## Request routing
 
 All synced models use the host's built-in OpenAI-compatible provider:
