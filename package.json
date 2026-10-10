@@ -20,6 +20,7 @@
     "omp.ts",
     "pi.ts",
     "prime.ts",
+    "scripts/sync-once.ts",
     "README.md",
     "LICENSE"
   ],
