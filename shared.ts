@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { registerGatewayTelemetry } from "./telemetry.ts";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -34,6 +35,8 @@ export interface AgentHomeOptions {
 interface OmniConfig {
 	serverUrl: string;
 	apiKey: string;
+	apiKeyEnv?: string;
+	allowApiKeyCommand?: boolean;
 	providerName: string;
 	autoSyncIntervalMinutes?: number;
 	includeModels?: string[];
@@ -107,6 +110,8 @@ const EXTENSION_STATE_DIR = "omniroute-agent-extension";
 const DEFAULT_CONFIG: OmniConfig = {
 	serverUrl: "http://127.0.0.1:20128",
 	apiKey: "",
+	apiKeyEnv: "",
+	allowApiKeyCommand: false,
 	providerName: "omni",
 	autoSyncIntervalMinutes: 0,
 	includeModels: [],
@@ -205,6 +210,8 @@ export function sanitizeConfig(input: Partial<OmniConfig>): OmniConfig {
 	return {
 		serverUrl: normalizeServerUrl(String(input.serverUrl || DEFAULT_CONFIG.serverUrl)),
 		apiKey: String(input.apiKey ?? ""),
+		apiKeyEnv: String(input.apiKeyEnv ?? "").trim(),
+		allowApiKeyCommand: input.allowApiKeyCommand === true || process.env.OMNIROUTE_ALLOW_API_KEY_COMMAND === "1" || process.env.OMNIROUTE_ALLOW_API_KEY_COMMAND === "true",
 		providerName: String(input.providerName || DEFAULT_CONFIG.providerName).trim() || DEFAULT_CONFIG.providerName,
 		autoSyncIntervalMinutes: sanitizeAutoSyncIntervalMinutes(
 			process.env.OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES ?? input.autoSyncIntervalMinutes ?? DEFAULT_CONFIG.autoSyncIntervalMinutes,
@@ -244,8 +251,35 @@ function readModelsJson(agentHome: string): any {
 }
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
+function runApiKeyCommand(command: string): string {
+	const output = execFileSync("/bin/sh", ["-c", command], {
+		encoding: "utf8",
+		timeout: 3_000,
+		maxBuffer: 8 * 1024,
+		stdio: ["ignore", "pipe", "ignore"],
+	}).trim();
+	return output.length > 8_000 ? "" : output;
+}
+
+function resolveApiKey(config: OmniConfig): string {
+	if (process.env.OMNIROUTE_API_KEY) return process.env.OMNIROUTE_API_KEY;
+	if (config.apiKeyEnv) return process.env[config.apiKeyEnv] ?? "";
+	const raw = config.apiKey.trim();
+	if (raw.startsWith("$") && /^[A-Za-z_][A-Za-z0-9_]*$/.test(raw.slice(1))) return process.env[raw.slice(1)] ?? "";
+	if (raw.startsWith("!")) {
+		if (!config.allowApiKeyCommand) return "";
+		try {
+			return runApiKeyCommand(raw.slice(1));
+		} catch {
+			return "";
+		}
+	}
+	return raw;
+}
+
 function authHeaders(config: OmniConfig): Record<string, string> {
-	return config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {};
+	const apiKey = resolveApiKey(config);
+	return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
 }
 
 async function requestJson(config: OmniConfig, path: string, init: RequestInit = {}, timeoutMs = 10_000, agentHome?: string): Promise<any> {

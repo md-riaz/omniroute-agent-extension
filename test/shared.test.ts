@@ -464,3 +464,84 @@ test("health check prefers cheap ping and falls back to models endpoint", async 
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("does not send literal command-backed api keys unless command resolution is enabled", async () => {
+  const { createOmniExtension, syncOmniModelsForAgentHome } = await import("../shared.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "omni-command-key-disabled-"));
+  const agentHome = join(tmp, "agent");
+  mkdirSync(join(agentHome, "omniroute-agent-extension"), { recursive: true });
+  writeFileSync(join(agentHome, "omniroute-agent-extension", "config.json"), JSON.stringify({ serverUrl: "https://omniroute.example", apiKey: "!printf should-not-run", providerName: "omni" }));
+  const originalFetch = globalThis.fetch;
+  const authHeaders: string[] = [];
+  try {
+    globalThis.fetch = (async (_input: any, init?: any) => {
+      authHeaders.push(init?.headers?.Authorization ?? init?.headers?.authorization ?? "");
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const pi = { registerProvider() {}, registerTool() {}, registerCommand() {}, on() {} };
+    process.env.COMMAND_KEY_DISABLED_HOME = agentHome;
+    delete process.env.OMNIROUTE_ALLOW_API_KEY_COMMAND;
+    await createOmniExtension(pi as any, { homeEnvVar: "COMMAND_KEY_DISABLED_HOME", defaultHome: agentHome });
+    await syncOmniModelsForAgentHome(pi as any, { homeEnvVar: "COMMAND_KEY_DISABLED_HOME", defaultHome: agentHome });
+    assert(authHeaders.every((value) => value === ""), "literal !command must not be sent as bearer token");
+  } finally {
+    delete process.env.COMMAND_KEY_DISABLED_HOME;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("resolves command-backed api keys only when explicitly enabled", async () => {
+  const { createOmniExtension, syncOmniModelsForAgentHome } = await import("../shared.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "omni-command-key-enabled-"));
+  const agentHome = join(tmp, "agent");
+  mkdirSync(join(agentHome, "omniroute-agent-extension"), { recursive: true });
+  writeFileSync(join(agentHome, "omniroute-agent-extension", "config.json"), JSON.stringify({ serverUrl: "https://omniroute.example", apiKey: "!node -e \"process.stdout.write('resolved-key')\"", allowApiKeyCommand: true, providerName: "omni" }));
+  const originalFetch = globalThis.fetch;
+  const authHeaders: string[] = [];
+  try {
+    globalThis.fetch = (async (_input: any, init?: any) => {
+      authHeaders.push(init?.headers?.Authorization ?? init?.headers?.authorization ?? "");
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const pi = { registerProvider() {}, registerTool() {}, registerCommand() {}, on() {} };
+    process.env.COMMAND_KEY_ENABLED_HOME = agentHome;
+    await createOmniExtension(pi as any, { homeEnvVar: "COMMAND_KEY_ENABLED_HOME", defaultHome: agentHome });
+    await syncOmniModelsForAgentHome(pi as any, { homeEnvVar: "COMMAND_KEY_ENABLED_HOME", defaultHome: agentHome });
+    assert(authHeaders.some((value) => value === "Bearer resolved-key"));
+  } finally {
+    delete process.env.COMMAND_KEY_ENABLED_HOME;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("resolves api keys from apiKeyEnv and dollar-prefixed env references", async () => {
+  const { createOmniExtension, syncOmniModelsForAgentHome } = await import("../shared.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "omni-env-key-"));
+  const agentHome = join(tmp, "agent");
+  mkdirSync(join(agentHome, "omniroute-agent-extension"), { recursive: true });
+  writeFileSync(join(agentHome, "omniroute-agent-extension", "config.json"), JSON.stringify({ serverUrl: "https://omniroute.example", apiKeyEnv: "OMNIROUTE_TEST_KEY_ONE", providerName: "omni" }));
+  const originalFetch = globalThis.fetch;
+  const authHeaders: string[] = [];
+  try {
+    process.env.ENV_KEY_HOME = agentHome;
+    process.env.OMNIROUTE_TEST_KEY_ONE = "env-one";
+    process.env.OMNIROUTE_TEST_KEY_TWO = "env-two";
+    globalThis.fetch = (async (_input: any, init?: any) => {
+      authHeaders.push(init?.headers?.Authorization ?? init?.headers?.authorization ?? "");
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const pi = { registerProvider() {}, registerTool() {}, registerCommand() {}, on() {} };
+    await createOmniExtension(pi as any, { homeEnvVar: "ENV_KEY_HOME", defaultHome: agentHome });
+    await syncOmniModelsForAgentHome(pi as any, { homeEnvVar: "ENV_KEY_HOME", defaultHome: agentHome });
+    writeFileSync(join(agentHome, "omniroute-agent-extension", "config.json"), JSON.stringify({ serverUrl: "https://omniroute.example", apiKey: "$OMNIROUTE_TEST_KEY_TWO", providerName: "omni" }));
+    await syncOmniModelsForAgentHome(pi as any, { homeEnvVar: "ENV_KEY_HOME", defaultHome: agentHome });
+    assert(authHeaders.includes("Bearer env-one"));
+    assert(authHeaders.includes("Bearer env-two"));
+  } finally {
+    delete process.env.ENV_KEY_HOME;
+    delete process.env.OMNIROUTE_TEST_KEY_ONE;
+    delete process.env.OMNIROUTE_TEST_KEY_TWO;
+    globalThis.fetch = originalFetch;
+  }
+});

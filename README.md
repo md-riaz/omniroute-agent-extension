@@ -108,6 +108,43 @@ Rules:
 - Manual `/omni sync` always works, even when repeating autosync is off.
 - `OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES` overrides the saved setting.
 
+## API key resolution
+
+The safest option is `OMNIROUTE_API_KEY`, because the key stays out of the extension config file.
+
+The config also supports env indirection:
+
+```json
+{
+  "apiKeyEnv": "OMNIROUTE_API_KEY"
+}
+```
+
+or:
+
+```json
+{
+  "apiKey": "$OMNIROUTE_API_KEY"
+}
+```
+
+Command-backed keys are supported only when explicitly enabled:
+
+```json
+{
+  "apiKey": "!op read op://vault/omniroute/api-key",
+  "allowApiKeyCommand": true
+}
+```
+
+You can also enable command-backed keys with:
+
+```bash
+OMNIROUTE_ALLOW_API_KEY_COMMAND=true
+```
+
+By default, an `apiKey` starting with `!` is not executed and is not sent literally as a bearer token. This avoids leaking command strings and prevents silent shell execution from config files. Command output is trimmed, capped, never logged, and the command has a short timeout.
+
 ## Model filters
 
 OmniRoute can advertise hundreds of models, including models for providers you have not connected. You can keep the model picker usable with include and exclude globs. Filters apply during `/omni sync` and startup sync. They use only `/v1/models`, so a normal OmniRoute inference API key is enough. No management or admin token is required.
@@ -163,11 +200,12 @@ auto/cheap   auto/offline   auto/smart   auto/lkgp
 | Variable | Description |
 |---|---|
 | `OMNIROUTE_URL` | OmniRoute server base URL |
-| `OMNIROUTE_API_KEY` | API key |
+| `OMNIROUTE_API_KEY` | API key. This wins over saved config and is the safest way to provide secrets. |
 | `OMNIROUTE_PROVIDER_NAME` | Provider name shown in the picker (default: `omni`) |
 | `OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES` | Optional background catalog sync interval in minutes. `0` disables repeating autosync; values from `1` to `4` clamp to `5`. |
 | `OMNIROUTE_INCLUDE_MODELS` | Optional comma-separated model globs to keep, for example `openai/*,anthropic/*`. |
 | `OMNIROUTE_EXCLUDE_MODELS` | Optional comma-separated model globs to hide, for example `*/deprecated*`. |
+| `OMNIROUTE_ALLOW_API_KEY_COMMAND` | Set to `true` or `1` to allow `apiKey` values beginning with `!` to run as commands. Disabled by default. |
 
 When any of these are set, `/omni setup` is not required.
 

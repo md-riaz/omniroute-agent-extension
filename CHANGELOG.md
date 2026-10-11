@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.3
+
+### Added
+
+- Add safe API key resolution for extension-owned OmniRoute requests.
+- Support `apiKeyEnv` and `$ENV_VAR` references so users can keep keys outside config files.
+- Support command-backed `!command` API keys only when explicitly enabled with `allowApiKeyCommand: true` or `OMNIROUTE_ALLOW_API_KEY_COMMAND=true`.
+
+### Fixed
+
+- Do not send literal `!command` values as bearer tokens when command-backed key resolution is disabled.
+
 ## 3.2.2
 
 ### Added
