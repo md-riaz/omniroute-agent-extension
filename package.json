@@ -1,6 +1,6 @@
 {
   "name": "omniroute-agent-extension",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "description": "OmniRoute extension for Pi Coding Agent, OMP, and Prime Agent with model sync, pricing, telemetry, catalog autosync, and OpenAI-compatible routing",
   "keywords": [
     "omp-plugin",

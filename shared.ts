@@ -36,6 +36,8 @@ interface OmniConfig {
 	apiKey: string;
 	providerName: string;
 	autoSyncIntervalMinutes?: number;
+	includeModels?: string[];
+	excludeModels?: string[];
 }
 
 interface OmniApiModel {
@@ -82,13 +84,33 @@ type ProviderModelConfig = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PROVIDER_API = "openai-completions";
-const AUTO_MODELS = ["auto", "auto/coding", "auto/fast", "auto/cheap", "auto/offline", "auto/smart", "auto/lkgp"];
+const AUTO_MODELS = [
+	"auto",
+	"auto/coding",
+	"auto/fast",
+	"auto/cheap",
+	"auto/offline",
+	"auto/smart",
+	"auto/lkgp",
+	"auto/best-chat",
+	"auto/best-coding",
+	"auto/best-fast",
+	"auto/best-vision",
+	"auto/best-reasoning",
+];
+const PROVIDER_COMPAT = {
+	sessionAffinityFormat: "openrouter",
+	promptCacheSessionHeader: "x-session-id",
+	supportsLongCacheRetention: true,
+};
 const EXTENSION_STATE_DIR = "omniroute-agent-extension";
 const DEFAULT_CONFIG: OmniConfig = {
 	serverUrl: "http://127.0.0.1:20128",
 	apiKey: "",
 	providerName: "omni",
 	autoSyncIntervalMinutes: 0,
+	includeModels: [],
+	excludeModels: [],
 };
 const MIN_AUTO_SYNC_INTERVAL_MINUTES = 5;
 const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 60;
@@ -173,6 +195,12 @@ export function sanitizeAutoSyncIntervalMinutes(value: unknown): number {
 	return Math.min(MAX_TIMER_MINUTES, Math.max(MIN_AUTO_SYNC_INTERVAL_MINUTES, Math.floor(n)));
 }
 
+function parseModelGlobs(value: unknown): string[] {
+	if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+	if (typeof value === "string") return value.split(",").map((item) => item.trim()).filter(Boolean);
+	return [];
+}
+
 export function sanitizeConfig(input: Partial<OmniConfig>): OmniConfig {
 	return {
 		serverUrl: normalizeServerUrl(String(input.serverUrl || DEFAULT_CONFIG.serverUrl)),
@@ -181,6 +209,8 @@ export function sanitizeConfig(input: Partial<OmniConfig>): OmniConfig {
 		autoSyncIntervalMinutes: sanitizeAutoSyncIntervalMinutes(
 			process.env.OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES ?? input.autoSyncIntervalMinutes ?? DEFAULT_CONFIG.autoSyncIntervalMinutes,
 		),
+		includeModels: parseModelGlobs(process.env.OMNIROUTE_INCLUDE_MODELS ?? input.includeModels),
+		excludeModels: parseModelGlobs(process.env.OMNIROUTE_EXCLUDE_MODELS ?? input.excludeModels),
 	};
 }
 
@@ -190,6 +220,8 @@ function loadConfig(agentHome: string): OmniConfig {
 	if (process.env.OMNIROUTE_API_KEY) env.apiKey = process.env.OMNIROUTE_API_KEY;
 	if (process.env.OMNIROUTE_PROVIDER_NAME) env.providerName = process.env.OMNIROUTE_PROVIDER_NAME;
 	if (process.env.OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES !== undefined) env.autoSyncIntervalMinutes = sanitizeAutoSyncIntervalMinutes(process.env.OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES);
+	if (process.env.OMNIROUTE_INCLUDE_MODELS !== undefined) env.includeModels = parseModelGlobs(process.env.OMNIROUTE_INCLUDE_MODELS);
+	if (process.env.OMNIROUTE_EXCLUDE_MODELS !== undefined) env.excludeModels = parseModelGlobs(process.env.OMNIROUTE_EXCLUDE_MODELS);
 	try {
 		return sanitizeConfig({ ...DEFAULT_CONFIG, ...JSON.parse(readFileSync(configPath(agentHome), "utf8")), ...env });
 	} catch {
@@ -264,6 +296,39 @@ export function isOmniRouteReachableHttpStatus(status: number): boolean {
 }
 
 async function checkHealth(agentHome: string, config: OmniConfig, context = "health"): Promise<boolean> {
+	const record = (ok: boolean, started: number, extra: Record<string, unknown>) =>
+		appendConnectionLog(agentHome, { event: "health", context, ok, ms: Date.now() - started, server: config.serverUrl, ...extra });
+
+	const pingStarted = Date.now();
+	try {
+		const ping = await fetch(`${config.serverUrl}/api/health/ping`, {
+			headers: authHeaders(config),
+			signal: AbortSignal.timeout(3_000),
+		});
+		try {
+			await ping.body?.cancel();
+		} catch {}
+		if (ping.ok || ping.status === 401 || ping.status === 403) {
+			if (Date.now() - pingStarted > CONNECTION_LOG_SLOW_MS || !ping.ok)
+			record(true, pingStarted, {
+				endpoint: "/api/health/ping",
+				status: ping.status,
+				error: ping.ok ? undefined : `HTTP ${ping.status} (reachable)`,
+			});
+			return true;
+		}
+		if (ping.status >= 500 || ping.status === 408) {
+			record(false, pingStarted, {
+				endpoint: "/api/health/ping",
+				status: ping.status,
+				error: (ping.statusText || `HTTP ${ping.status}`).slice(0, 200),
+			});
+			return false;
+		}
+	} catch {
+		// Older OmniRoute servers may not have /api/health/ping. Fall back below.
+	}
+
 	for (let attempt = 0; attempt < 2; attempt++) {
 		const started = Date.now();
 		try {
@@ -271,52 +336,31 @@ async function checkHealth(agentHome: string, config: OmniConfig, context = "hea
 				headers: authHeaders(config),
 				signal: AbortSignal.timeout(10_000),
 			});
-			const ms = Date.now() - started;
-			// The health check only needs the status code — release the body
-			// stream (cancel, not read) so the socket/connection is freed
-			// whether this attempt succeeds, fails, or is retried.
 			try {
 				await res.body?.cancel();
-			} catch {
-				// body teardown must never change the health result
-			}
+			} catch {}
 			if (isOmniRouteReachableHttpStatus(res.status)) {
-				// log slow successes and auth/client responses. 401/403 mean
-				// the origin answered; they are auth problems, not downtime.
-				if (ms > CONNECTION_LOG_SLOW_MS || !res.ok)
-					appendConnectionLog(agentHome, {
-						event: "health",
-						context,
-						attempt,
-						ok: true,
-						ms,
-						status: res.status,
-						server: config.serverUrl,
-						error: res.ok ? undefined : `HTTP ${res.status} (reachable)`,
-					});
+				if (Date.now() - started > CONNECTION_LOG_SLOW_MS || !res.ok)
+				record(true, started, {
+					endpoint: "/v1/models",
+					attempt,
+					status: res.status,
+					error: res.ok ? undefined : `HTTP ${res.status} (reachable)`,
+				});
 				return true;
 			}
-			appendConnectionLog(agentHome, {
-				event: "health",
-				context,
+			record(false, started, {
+				endpoint: "/v1/models",
 				attempt,
-				ok: false,
-				ms,
 				status: res.status,
-				server: config.serverUrl,
 				error: (res.statusText || `HTTP ${res.status}`).slice(0, 200),
 			});
 		} catch (err) {
-			appendConnectionLog(agentHome, {
-				event: "health",
-				context,
+			record(false, started, {
+				endpoint: "/v1/models",
 				attempt,
-				ok: false,
-				ms: Date.now() - started,
-				server: config.serverUrl,
 				error: errorBrief(err),
 			});
-			// cold start / transient network blip — retry once
 		}
 	}
 	return false;
@@ -442,10 +486,23 @@ function buildAutoModel(id: string): ProviderModelConfig {
 	};
 }
 
+function globMatches(value: string, pattern: string): boolean {
+	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("*", ".*").replaceAll("?", ".");
+	return new RegExp(`^${escaped}$`).test(value);
+}
+
+function shouldIncludeModel(id: string, config: OmniConfig): boolean {
+	const includes = config.includeModels ?? [];
+	const excludes = config.excludeModels ?? [];
+	const isAuto = AUTO_MODELS.includes(id);
+	if (!isAuto && includes.length > 0 && !includes.some((pattern) => globMatches(id, pattern))) return false;
+	return !excludes.some((pattern) => globMatches(id, pattern));
+}
+
 async function discoverModels(config: OmniConfig, agentHome?: string): Promise<ProviderModelConfig[]> {
-	const synced = await fetchSyncedModels(config, agentHome);
+	const synced = (await fetchSyncedModels(config, agentHome)).filter((m) => shouldIncludeModel(m.id, config));
 	const syncedIds = new Set(synced.map((m) => m.id));
-	const autoModels = AUTO_MODELS.filter((id) => !syncedIds.has(id)).map(buildAutoModel);
+	const autoModels = AUTO_MODELS.filter((id) => !syncedIds.has(id) && shouldIncludeModel(id, config)).map(buildAutoModel);
 	return [...autoModels, ...synced.map(buildProviderModelConfig)];
 }
 
@@ -455,6 +512,7 @@ function buildProviderEntry(config: OmniConfig, models: ProviderModelConfig[]): 
 		apiKey: config.apiKey || "omniroute-public",
 		api: PROVIDER_API,
 		authHeader: true,
+		compat: PROVIDER_COMPAT,
 		models,
 	};
 }
