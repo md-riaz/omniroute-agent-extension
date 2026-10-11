@@ -154,6 +154,26 @@ npm run typecheck   # tsc — zero errors expected
 npm run smoke       # import check for omp.ts and pi.ts
 ```
 
+## Release checklist
+
+Before publishing a release, run:
+
+```bash
+npm test
+npm run typecheck
+npm run smoke
+npm pack --dry-run
+```
+
+When an OmniRoute API key is available in the environment, also test a real catalog sync against a scratch agent home:
+
+```bash
+PI_CODING_AGENT_DIR=/path/to/scratch-agent-home \
+  node --experimental-strip-types scripts/sync-once.ts PI_CODING_AGENT_DIR /path/to/scratch-agent-home
+```
+
+Check `CHANGELOG.md` before tagging or publishing.
+
 | File | Purpose |
 |---|---|
 | `shared.ts` | All business logic — no host package imports; works in `pi`, `omp`, and Prime Agent |
