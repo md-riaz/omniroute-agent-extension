@@ -11,15 +11,15 @@ Connect to your local or remote OmniRoute server and route queries across 44+ LL
 
 - **Wizard-based setup** — `/omni setup` inside `pi`, `omp`, or Prime Agent. No manual JSON editing.
 - **Multi-CLI support** — one package, identical feature set for `pi`, `omp`, and Prime Agent.
-- **Model sync** — push all OmniRoute models into the `Ctrl+P` / `/model` picker with full metadata: context windows, max tokens, reasoning, vision capabilities, and per-model cost.
+- **Model sync** — push OmniRoute models into the `Ctrl+P` / `/model` picker with full metadata: context windows, max tokens, reasoning, vision capabilities, and per-model cost. Use include/exclude filters when OmniRoute advertises more models than you want in the picker.
 - **Catalog autosync** — one quiet sync runs when a configured session starts. Repeating background sync is off by default and can be enabled with `/omni autosync on` for a 60-minute interval, with a 5-minute minimum.
 - **Cost tracking** — OmniRoute `pricing` values from `/v1/models` are written into host model `cost`, so priced models no longer show as `$0`.
 - **Native tool calls** — the host's built-in `openai-completions` handler runs every request, so you get real SSE streaming and native `tool_calls` for all models.
 - **Smart sorting** — models grouped by provider prefix, auto-routing models (`auto`, `auto/coding`, etc.) always first.
 - **Gateway telemetry** — after each turn, surface OmniRoute-resolved tok/s, cost, and routed model/provider when the gateway sends them. tok/s is never computed as tokens/latency. Missing values stay unavailable until OmniRoute emits them.
-- **Health monitoring** — periodic reachability checks with status bar indicators.
+- **Health monitoring** — periodic reachability checks with status bar indicators. The extension tries `/api/health/ping` first and falls back to `/v1/models`, so older OmniRoute servers still work.
 - **Connection log** — every failed or abnormally slow connection attempt is appended as a JSON line to `<agent-home>/<state>/connection.log` for infra debugging; `ms` timings expose server cold starts, error fields include the fetch `cause` (e.g. `ECONNRESET`, `ETIMEDOUT`, TLS errors).
-- **Env overrides** — `OMNIROUTE_URL`, `OMNIROUTE_API_KEY`, `OMNIROUTE_PROVIDER_NAME` skip the setup wizard entirely.
+- **Env overrides** — `OMNIROUTE_URL`, `OMNIROUTE_API_KEY`, `OMNIROUTE_PROVIDER_NAME`, `OMNIROUTE_INCLUDE_MODELS`, and `OMNIROUTE_EXCLUDE_MODELS` skip the setup wizard entirely.
 
 ## Installation
 
@@ -108,6 +108,28 @@ Rules:
 - Manual `/omni sync` always works, even when repeating autosync is off.
 - `OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES` overrides the saved setting.
 
+## Model filters
+
+OmniRoute can advertise hundreds of models, including models for providers you have not connected. You can keep the model picker usable with include and exclude globs. Filters apply during `/omni sync` and startup sync. They use only `/v1/models`, so a normal OmniRoute inference API key is enough. No management or admin token is required.
+
+Config example:
+
+```json
+{
+  "includeModels": ["openai/*", "anthropic/*", "auto/*"],
+  "excludeModels": ["*/deprecated*", "*/free-trial*"]
+}
+```
+
+Environment overrides:
+
+```bash
+OMNIROUTE_INCLUDE_MODELS="openai/*,anthropic/*"
+OMNIROUTE_EXCLUDE_MODELS="*/deprecated*,*/free-trial*"
+```
+
+Built-in `auto` routing models stay visible by default unless an exclude pattern matches them.
+
 ## Agent Tools
 
 Two tools the LLM can call directly:
@@ -144,6 +166,8 @@ auto/cheap   auto/offline   auto/smart   auto/lkgp
 | `OMNIROUTE_API_KEY` | API key |
 | `OMNIROUTE_PROVIDER_NAME` | Provider name shown in the picker (default: `omni`) |
 | `OMNIROUTE_AUTO_SYNC_INTERVAL_MINUTES` | Optional background catalog sync interval in minutes. `0` disables repeating autosync; values from `1` to `4` clamp to `5`. |
+| `OMNIROUTE_INCLUDE_MODELS` | Optional comma-separated model globs to keep, for example `openai/*,anthropic/*`. |
+| `OMNIROUTE_EXCLUDE_MODELS` | Optional comma-separated model globs to hide, for example `*/deprecated*`. |
 
 When any of these are set, `/omni setup` is not required.
 

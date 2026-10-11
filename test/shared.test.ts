@@ -314,7 +314,7 @@ test("autosync command uses minutes and defaults repeat sync off", async () => {
 
     await events.get("session_start")?.({}, ctx);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(modelsCalls, 2, "health probe plus one quiet startup sync");
+    assert.equal(modelsCalls, 1, "one quiet startup sync after cheap health ping");
     assert.equal(registrations.length, 1);
     assert.equal(refreshes.length, 1);
 
@@ -344,5 +344,123 @@ test("autosync command uses minutes and defaults repeat sync off", async () => {
     else process.env.OMNIROUTE_API_KEY = previousKey;
     globalThis.fetch = originalFetch;
     rmSync(agentHome, { recursive: true, force: true });
+  }
+});
+
+
+test("filters synced models with include and exclude globs while preserving auto models by default", async () => {
+  const { createOmniExtension, syncOmniModelsForAgentHome } = await import("../shared.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "omni-filter-"));
+  const agentHome = join(tmp, "agent");
+  mkdirSync(join(agentHome, "omniroute-agent-extension"), { recursive: true });
+  writeFileSync(
+    join(agentHome, "omniroute-agent-extension", "config.json"),
+    JSON.stringify({
+      serverUrl: "https://omniroute.example",
+      apiKey: "test-key",
+      providerName: "omni",
+      includeModels: ["openai/*", "anthropic/*"],
+      excludeModels: ["*/deprecated*"],
+    }),
+  );
+
+  const originalFetch = globalThis.fetch;
+  const registrations: any[] = [];
+  try {
+    globalThis.fetch = (async (input: any) => {
+      if (String(input).endsWith("/v1/models")) {
+        return new Response(JSON.stringify({
+          data: [
+            { id: "openai/gpt-5", name: "GPT 5", owned_by: "openai", input_modalities: ["text"] },
+            { id: "anthropic/claude", name: "Claude", owned_by: "anthropic", input_modalities: ["text"] },
+            { id: "google/gemini", name: "Gemini", owned_by: "google", input_modalities: ["text"] },
+            { id: "openai/deprecated-old", name: "Old", owned_by: "openai", input_modalities: ["text"] },
+          ],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected fetch ${input}`);
+    }) as typeof fetch;
+
+    const pi = {
+      registerProvider(name: string, config: any) { registrations.push({ name, config }); },
+      registerTool() {},
+      registerCommand() {},
+      on() {},
+    };
+    process.env.FILTER_TEST_HOME = agentHome;
+    await createOmniExtension(pi as any, { homeEnvVar: "FILTER_TEST_HOME", defaultHome: agentHome });
+    await syncOmniModelsForAgentHome(pi as any, { homeEnvVar: "FILTER_TEST_HOME", defaultHome: agentHome });
+    const ids = registrations.at(-1).config.models.map((m: any) => m.id);
+    assert(ids.includes("auto"));
+    assert(ids.includes("openai/gpt-5"));
+    assert(ids.includes("anthropic/claude"));
+    assert(!ids.includes("google/gemini"));
+    assert(!ids.includes("openai/deprecated-old"));
+  } finally {
+    delete process.env.FILTER_TEST_HOME;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("provider config advertises OmniRoute cache and session affinity compat defaults", async () => {
+  const { createOmniExtension, syncOmniModelsForAgentHome } = await import("../shared.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "omni-compat-"));
+  const agentHome = join(tmp, "agent");
+  mkdirSync(join(agentHome, "omniroute-agent-extension"), { recursive: true });
+  writeFileSync(join(agentHome, "omniroute-agent-extension", "config.json"), JSON.stringify({ serverUrl: "https://omniroute.example", apiKey: "test-key", providerName: "omni" }));
+  const originalFetch = globalThis.fetch;
+  const registrations: any[] = [];
+  try {
+    globalThis.fetch = (async (input: any) => {
+      if (String(input).endsWith("/v1/models")) {
+        return new Response(JSON.stringify({ data: [{ id: "openai/gpt-5", name: "GPT 5", input_modalities: ["text"] }] }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected fetch ${input}`);
+    }) as typeof fetch;
+    const pi = { registerProvider(name: string, config: any) { registrations.push({ name, config }); }, registerTool() {}, registerCommand() {}, on() {} };
+    process.env.COMPAT_TEST_HOME = agentHome;
+    await createOmniExtension(pi as any, { homeEnvVar: "COMPAT_TEST_HOME", defaultHome: agentHome });
+    await syncOmniModelsForAgentHome(pi as any, { homeEnvVar: "COMPAT_TEST_HOME", defaultHome: agentHome });
+    assert.deepEqual(registrations.at(-1).config.compat, {
+      sessionAffinityFormat: "openrouter",
+      promptCacheSessionHeader: "x-session-id",
+      supportsLongCacheRetention: true,
+    });
+  } finally {
+    delete process.env.COMPAT_TEST_HOME;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("health check prefers cheap ping and falls back to models endpoint", async () => {
+  const { createOmniExtension } = await import("../shared.ts");
+  const tmp = mkdtempSync(join(tmpdir(), "omni-health-"));
+  const agentHome = join(tmp, "agent");
+  mkdirSync(join(agentHome, "omniroute-agent-extension"), { recursive: true });
+  writeFileSync(join(agentHome, "omniroute-agent-extension", "config.json"), JSON.stringify({ serverUrl: "https://omniroute.example", apiKey: "test-key", providerName: "omni" }));
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  let status = "";
+  try {
+    globalThis.fetch = (async (input: any) => {
+      calls.push(String(input));
+      if (String(input).endsWith("/api/health/ping")) return new Response("missing", { status: 404 });
+      if (String(input).endsWith("/v1/models")) return new Response(JSON.stringify({ data: [] }), { status: 401, headers: { "content-type": "application/json" } });
+      throw new Error(`unexpected fetch ${input}`);
+    }) as typeof fetch;
+    let commandHandler: any;
+    const pi = {
+      registerProvider() {}, registerTool() {},
+      registerCommand(_name: string, opts: any) { commandHandler = opts.handler; },
+      on() {},
+    };
+    process.env.HEALTH_TEST_HOME = agentHome;
+    await createOmniExtension(pi as any, { homeEnvVar: "HEALTH_TEST_HOME", defaultHome: agentHome });
+    await commandHandler("", { ui: { notify(message: string) { status = message; } } });
+    assert(calls.some((url) => url.endsWith("/api/health/ping")));
+    assert(calls.some((url) => url.endsWith("/v1/models")));
+    assert.match(status, /reachable/);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

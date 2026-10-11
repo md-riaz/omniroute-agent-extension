@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.2
+
+### Added
+
+- Add include and exclude model glob filters with `OMNIROUTE_INCLUDE_MODELS` and `OMNIROUTE_EXCLUDE_MODELS` env overrides to reduce model picker clutter without requiring OmniRoute management tokens.
+- Add OmniRoute provider compatibility defaults for session affinity and prompt cache reuse.
+- Add current `auto/best-*` routing model IDs to the built-in auto model list.
+
+### Changed
+
+- Health checks now try the lightweight `/api/health/ping` endpoint first and fall back to `/v1/models` when that endpoint is unavailable.
+
 ## 3.2.1
 
 ### Fixed
