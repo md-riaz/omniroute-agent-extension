@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.2.1
+
+### Fixed
+
+- Link Prime Agent in the README intro so npm users can reach the Prime Agent project directly.
+
 ## 3.2.0
 
 ### Added
