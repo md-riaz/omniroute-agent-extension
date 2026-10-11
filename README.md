@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/omniroute-agent-extension.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-agent-extension)
 [![npm downloads](https://img.shields.io/npm/dm/omniroute-agent-extension.svg?style=flat-square)](https://www.npmjs.com/package/omniroute-agent-extension)
 
-OmniRoute extension for [Pi Coding Agent](https://pi.dev) (`pi`), [Oh My Pi](https://omp.sh) (`omp`), and Prime Agent.
+OmniRoute extension for [Pi Coding Agent](https://pi.dev) (`pi`), [Oh My Pi](https://omp.sh) (`omp`), and [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent).
 
 Connect to your local or remote OmniRoute server and route queries across 44+ LLM providers directly from your agent CLI.
 
