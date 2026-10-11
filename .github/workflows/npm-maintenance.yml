@@ -1,0 +1,38 @@
+name: npm maintenance
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: npm package name
+        required: true
+        type: string
+      version:
+        description: Version/range to deprecate, for example "*" or "0.0.0-stage"
+        required: true
+        type: string
+      message:
+        description: Deprecation message
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Deprecate package version/range
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE_NAME: ${{ inputs.package }}
+          PACKAGE_VERSION: ${{ inputs.version }}
+          DEPRECATION_MESSAGE: ${{ inputs.message }}
+        run: npm deprecate "${PACKAGE_NAME}@${PACKAGE_VERSION}" "${DEPRECATION_MESSAGE}"

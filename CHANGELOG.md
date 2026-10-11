@@ -48,3 +48,5 @@ PI_CODING_AGENT_DIR=/path/to/scratch-agent-home \
 ```
 
 Do not paste API keys into issue comments, PR bodies, shell history, logs, or docs.
+
+The repository includes a manual npm maintenance workflow for package deprecation tasks. It uses the `NPM_TOKEN` repository secret and does not print token values.
