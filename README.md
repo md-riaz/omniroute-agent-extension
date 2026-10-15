@@ -43,13 +43,15 @@ pi install omniroute-agent-extension
 pi install git:github.com/md-riaz/omniroute-agent-extension
 ```
 
-**Prime Agent:**
+**Prime Agent (legacy TypeScript runtime):**
 
 ```bash
 prime-agent package install git:github.com/md-riaz/omniroute-agent-extension
 ```
 
-Prime Agent uses `PRIME_AGENT_CODING_AGENT_DIR` when set, otherwise `~/.prime/agent`.
+Prime's legacy TypeScript runtime uses the same Pi-compatible entrypoint. It exports `PRIME_AGENT_CODING_AGENT_DIR`, so the extension uses Prime's home even if `PI_CODING_AGENT_DIR` is also present.
+
+Prime Agent v0.10+ has a Rust runtime that accepts packages but currently loads only skills, prompts, and themes, not TypeScript extensions. This package cannot register `/omni` there until Prime restores an extension API.
 
 When replacing the earlier Pi-only `omniroute-pi-ext-integration`, existing `omni` catalog entries are normalized automatically on first load. Run `/omni sync` afterward to refresh the catalog from the server.
 
@@ -213,7 +215,7 @@ When any of these are set, `/omni setup` is not required.
 
 ```bash
 npm run typecheck   # tsc — zero errors expected
-npm run smoke       # import check for omp.ts and pi.ts
+npm run smoke       # import check for omp.ts and compat.ts
 ```
 
 ## Release checklist
@@ -240,8 +242,7 @@ Check `CHANGELOG.md` before tagging or publishing.
 |---|---|
 | `shared.ts` | All business logic — no host package imports; works in `pi`, `omp`, and Prime Agent |
 | `omp.ts` | Oh My Pi entry point — `OMP_HOME` / `~/.omp/agent` |
-| `pi.ts` | Pi Coding Agent entry point — `PI_CODING_AGENT_DIR` / `~/.pi/agent` |
-| `prime.ts` | Prime Agent entry point — `PRIME_AGENT_CODING_AGENT_DIR` / `~/.prime/agent` |
+| `compat.ts` | Pi-compatible entry point — Prime home when `PRIME_AGENT_CODING_AGENT_DIR` is set, otherwise Pi home |
 
 ## Requirements
 

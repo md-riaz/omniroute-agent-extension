@@ -23,8 +23,7 @@
     "shared.ts",
     "telemetry.ts",
     "omp.ts",
-    "pi.ts",
-    "prime.ts",
+    "compat.ts",
     "scripts/sync-once.ts",
     "README.md",
     "LICENSE"
@@ -36,14 +35,13 @@
   },
   "pi": {
     "extensions": [
-      "./pi.ts",
-      "./prime.ts"
+      "./compat.ts"
     ]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "smoke": "node --experimental-strip-types -e \"import('./omp.ts').then(()=>console.log('omp ok')).catch(e=>{console.error(e);process.exit(1)})\" && node --experimental-strip-types -e \"import('./pi.ts').then(()=>console.log('pi ok')).catch(e=>{console.error(e);process.exit(1)})\" && node --experimental-strip-types -e \"import('./prime.ts').then(()=>console.log('prime ok')).catch(e=>{console.error(e);process.exit(1)})\""
+    "smoke": "node --experimental-strip-types -e \"import('./omp.ts').then(()=>console.log('omp ok')).catch(e=>{console.error(e);process.exit(1)})\" && node --experimental-strip-types -e \"import('./compat.ts').then(()=>console.log('compat ok')).catch(e=>{console.error(e);process.exit(1)})\""
   },
   "author": "md-riaz",
   "license": "MIT",

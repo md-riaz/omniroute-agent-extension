@@ -2,12 +2,11 @@
 
 ## Overview
 
-This package provides OmniRoute extensions for Pi Coding Agent, Oh My Pi, and Prime Agent. The host-specific entrypoints call the shared implementation:
+This package provides OmniRoute extensions for Pi Coding Agent, Oh My Pi, and Prime Agent. `compat.ts` is the only Pi-compatible manifest entrypoint: it selects Prime when `PRIME_AGENT_CODING_AGENT_DIR` is set, otherwise Pi. OMP has its own manifest entrypoint:
 
 ```text
-pi.ts     -> createOmniExtension({ homeEnvVar: PI_CODING_AGENT_DIR, defaultHome: ~/.pi/agent })
-omp.ts    -> createOmniExtension({ homeEnvVar: OMP_HOME, defaultHome: ~/.omp/agent })
-prime.ts  -> createOmniExtension({ homeEnvVar: PRIME_AGENT_CODING_AGENT_DIR, defaultHome: ~/.prime/agent })
+compat.ts -> PRIME_AGENT_CODING_AGENT_DIR / ~/.prime/agent, otherwise PI_CODING_AGENT_DIR / ~/.pi/agent
+omp.ts    -> OMP_HOME / ~/.omp/agent
 ```
 
 The extension registers `/omni` commands, an `omni` provider, two model-management tools, health monitoring, and gateway telemetry.

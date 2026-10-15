@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -118,10 +118,22 @@ test("expands a leading ~ in the agent-home env var", async () => {
   }
 });
 
-test("prime agent entrypoint uses PRIME_AGENT_CODING_AGENT_DIR", async () => {
-  const agentHome = mkdtempSync(join(tmpdir(), "omniroute-prime-home-"));
-  const previousHome = process.env.PRIME_AGENT_CODING_AGENT_DIR;
-  process.env.PRIME_AGENT_CODING_AGENT_DIR = agentHome;
+test("package manifest loads one Pi-compatible entrypoint", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.deepEqual(packageJson.pi.extensions, ["./compat.ts"]);
+  assert.deepEqual(packageJson.omp.extensions, ["./omp.ts"]);
+  assert(packageJson.files.includes("compat.ts"));
+  assert(!packageJson.files.includes("pi.ts"));
+  assert(!packageJson.files.includes("prime.ts"));
+});
+
+test("compat entrypoint uses Pi home when Prime home is absent", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omniroute-compat-pi-home-"));
+  const piHome = join(root, "pi");
+  const previousPiHome = process.env.PI_CODING_AGENT_DIR;
+  const previousPrimeHome = process.env.PRIME_AGENT_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = piHome;
+  delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
 
   const registrations: Array<{ name: string; config: any }> = [];
   const pi = {
@@ -134,28 +146,81 @@ test("prime agent entrypoint uses PRIME_AGENT_CODING_AGENT_DIR", async () => {
   };
 
   try {
+    mkdirSync(piHome, { recursive: true });
     writeFileSync(
-      join(agentHome, "models.json"),
+      join(piHome, "models.json"),
       JSON.stringify({
         providers: {
           omni: {
             baseUrl: "http://127.0.0.1:20128/v1",
             apiKey: "",
-            models: [{ id: "prime-test", name: "Prime Test" }],
+            models: [{ id: "pi-test", name: "pi-test" }],
           },
         },
       }),
     );
 
-    const mod = await import(`../prime.ts?case=${Date.now()}`);
+    const mod = await import(`../compat.ts?case=${Date.now()}`);
+    await mod.default(pi);
+
+    assert.equal(registrations.length, 1);
+    assert.equal(registrations[0].config.models[0].id, "pi-test");
+  } finally {
+    if (previousPiHome === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousPiHome;
+    if (previousPrimeHome === undefined) delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+    else process.env.PRIME_AGENT_CODING_AGENT_DIR = previousPrimeHome;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("compat entrypoint uses Prime home when Pi and Prime homes are both set", async () => {
+  const root = mkdtempSync(join(tmpdir(), "omniroute-compat-home-"));
+  const piHome = join(root, "pi");
+  const primeHome = join(root, "prime");
+  const previousPiHome = process.env.PI_CODING_AGENT_DIR;
+  const previousPrimeHome = process.env.PRIME_AGENT_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = piHome;
+  process.env.PRIME_AGENT_CODING_AGENT_DIR = primeHome;
+
+  const registrations: Array<{ name: string; config: any }> = [];
+  const pi = {
+    registerProvider(name: string, config: any) {
+      registrations.push({ name, config });
+    },
+    registerTool() {},
+    registerCommand() {},
+    on() {},
+  };
+
+  try {
+    for (const [home, id] of [[piHome, "pi-test"], [primeHome, "prime-test"]]) {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(
+        join(home, "models.json"),
+        JSON.stringify({
+          providers: {
+            omni: {
+              baseUrl: "http://127.0.0.1:20128/v1",
+              apiKey: "",
+              models: [{ id, name: id }],
+            },
+          },
+        }),
+      );
+    }
+
+    const mod = await import(`../compat.ts?case=${Date.now()}`);
     await mod.default(pi);
 
     assert.equal(registrations.length, 1);
     assert.equal(registrations[0].config.models[0].id, "prime-test");
   } finally {
-    if (previousHome === undefined) delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
-    else process.env.PRIME_AGENT_CODING_AGENT_DIR = previousHome;
-    rmSync(agentHome, { recursive: true, force: true });
+    if (previousPiHome === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousPiHome;
+    if (previousPrimeHome === undefined) delete process.env.PRIME_AGENT_CODING_AGENT_DIR;
+    else process.env.PRIME_AGENT_CODING_AGENT_DIR = previousPrimeHome;
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
