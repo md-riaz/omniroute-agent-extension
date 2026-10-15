@@ -114,7 +114,7 @@ It reads telemetry from:
 
 - `X-OmniRoute-*` response headers
 - JSON `usage.tokens_per_second`
-- final streaming SSE `usage.tokens_per_second`
+- final streaming SSE `usage.tokens_per_second`, captured incrementally before consumers can cancel after `data: [DONE]`
 
 Never calculate tok/s from latency. OmniRoute owns that measurement.
 

@@ -125,25 +125,57 @@ function parseSseCommentHeaders(line: string): Headers | undefined {
   return new Headers({ [match[1]]: match[2].trim() });
 }
 
-function parseStreamingTelemetry(headers: Headers, text: string): GatewayTelemetry {
+type StreamingTelemetryCapture = {
+  push(text: string): void;
+  finish(): void;
+};
+
+function createStreamingTelemetryCapture(headers: Headers, onCapture: (t: GatewayTelemetry) => void): StreamingTelemetryCapture {
   let telemetry = parseGatewayTelemetry(headers, {});
-  for (const rawLine of text.split(/\r?\n/)) {
+  let buffer = "";
+  let dirty = Object.keys(telemetry).length > 0;
+
+  const processLine = (rawLine: string) => {
     const line = rawLine.trimEnd();
     const commentHeaders = parseSseCommentHeaders(line);
     if (commentHeaders) {
       telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(commentHeaders, {}));
-      continue;
+      dirty = true;
+      return;
     }
-    if (!line.startsWith("data:")) continue;
+    if (!line.startsWith("data:")) return;
     const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
+    if (!data || data === "[DONE]") return;
     try {
       telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(headers, JSON.parse(data)));
+      dirty = true;
     } catch {
       // Ignore partial or non-JSON SSE payloads. The stream must pass through untouched.
     }
-  }
-  return telemetry;
+  };
+
+  const emit = () => {
+    if (!dirty) return;
+    dirty = false;
+    onCapture(telemetry);
+  };
+
+  return {
+    push(text: string) {
+      buffer += text;
+      let newlineIndex: number;
+      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+        processLine(buffer.slice(0, newlineIndex));
+        buffer = buffer.slice(newlineIndex + 1);
+      }
+      emit();
+    },
+    finish() {
+      if (buffer) processLine(buffer);
+      buffer = "";
+      emit();
+    },
+  };
 }
 
 function captureStreamingResponse(response: Response, onCapture: (t: GatewayTelemetry) => void): Response {
@@ -153,15 +185,15 @@ function captureStreamingResponse(response: Response, onCapture: (t: GatewayTele
   }
 
   const decoder = new TextDecoder();
-  let text = "";
+  const capture = createStreamingTelemetryCapture(response.headers, onCapture);
   const stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      text += decoder.decode(chunk, { stream: true });
+      capture.push(decoder.decode(chunk, { stream: true }));
       controller.enqueue(chunk);
     },
     flush() {
-      text += decoder.decode();
-      onCapture(parseStreamingTelemetry(response.headers, text));
+      capture.push(decoder.decode());
+      capture.finish();
     },
   }));
 
