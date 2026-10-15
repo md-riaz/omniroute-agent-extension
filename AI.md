@@ -19,8 +19,7 @@ It does four jobs:
 |---|---|
 | `shared.ts` | Shared implementation: commands, sync, pricing map, provider registration, health checks, connection log. |
 | `omp.ts` | Oh My Pi entrypoint. Uses `OMP_HOME` / `~/.omp/agent`. |
-| `pi.ts` | Pi Coding Agent entrypoint. Uses `PI_CODING_AGENT_DIR` / `~/.pi/agent`. |
-| `prime.ts` | Prime Agent entrypoint. Uses `PRIME_AGENT_CODING_AGENT_DIR` / `~/.prime/agent`. |
+| `compat.ts` | Pi-compatible entrypoint. Uses Prime's home when `PRIME_AGENT_CODING_AGENT_DIR` is set, otherwise Pi's home. |
 | `telemetry.ts` | Gateway telemetry parsing for headers, JSON bodies, and final streaming SSE usage. Never invents tok/s from latency. |
 | `test/shared.test.ts` | Shared extension tests. |
 | `test/telemetry.test.ts` | Telemetry parser and streaming capture tests. |
@@ -61,21 +60,22 @@ The extension does not proxy chat requests. The host sends requests directly to 
 
 ### Prime Agent manifest behavior
 
-Prime Agent currently reads the Pi-compatible manifest path. `prime.ts` is included under `pi.extensions` in `package.json`. Do not add a separate top-level `prime` manifest key unless real Prime runtime behavior or docs require it.
+Prime Agent reads the Pi-compatible manifest path. The package therefore exposes only `compat.ts` under `pi.extensions`. It uses `PRIME_AGENT_CODING_AGENT_DIR` when Prime starts it, otherwise it uses Pi's `PI_CODING_AGENT_DIR`. Do not add a separate top-level `prime` manifest key unless real Prime runtime behavior or docs require it.
 
 ## Important functions in `shared.ts`
 
 Read in this order:
 
-1. `createOmniExtension()` — entrypoint used by `pi.ts`, `omp.ts`, and `prime.ts`.
-2. `runSetup()` — setup flow, health probe, provider registration, config save.
-3. `fetchSyncedModels()` — fetches `/v1/models`, filters chat-capable models, maps metadata and pricing.
-4. `normalizeCost()` — maps OmniRoute `pricing` into host model `cost`.
-5. `discoverModels()` — combines auto models with synced models.
-6. `buildProviderModelConfig()` — converts a synced model into host provider config.
-7. `persistModelsJson()` — updates only `providers[providerName]` in `models.json`.
-8. `reloadProviderFromModelsJson()` — loads saved catalog and normalizes legacy API identifiers.
-9. `checkHealth()` / `isOmniRouteReachableHttpStatus()` — treat HTTP `< 500` as reachable.
+1. `createOmniExtension()` — shared factory used by `compat.ts` and `omp.ts`.
+2. `compat.ts` — selects Prime's home when `PRIME_AGENT_CODING_AGENT_DIR` is set, otherwise Pi's home.
+3. `runSetup()` — setup flow, health probe, provider registration, config save.
+4. `fetchSyncedModels()` — fetches `/v1/models`, filters chat-capable models, maps metadata and pricing.
+5. `normalizeCost()` — maps OmniRoute `pricing` into host model `cost`.
+6. `discoverModels()` — combines auto models with synced models.
+7. `buildProviderModelConfig()` — converts a synced model into host provider config.
+8. `persistModelsJson()` — updates only `providers[providerName]` in `models.json`.
+9. `reloadProviderFromModelsJson()` — loads saved catalog and normalizes legacy API identifiers.
+10. `checkHealth()` / `isOmniRouteReachableHttpStatus()` — treat HTTP `< 500` as reachable.
 
 ## Catalog autosync
 
