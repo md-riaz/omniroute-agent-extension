@@ -158,8 +158,7 @@ Expected smoke output:
 
 ```text
 omp ok
-pi ok
-prime ok
+compat ok
 ```
 
 ## Pitfalls
