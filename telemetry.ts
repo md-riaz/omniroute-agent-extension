@@ -125,6 +125,10 @@ function parseSseCommentHeaders(line: string): Headers | undefined {
   return new Headers({ [match[1]]: match[2].trim() });
 }
 
+function telemetryChanged(before: GatewayTelemetry, after: GatewayTelemetry): boolean {
+  return Object.keys(after).some((key) => before[key as keyof GatewayTelemetry] !== after[key as keyof GatewayTelemetry]);
+}
+
 type StreamingTelemetryCapture = {
   push(text: string): void;
   finish(): void;
@@ -135,20 +139,25 @@ function createStreamingTelemetryCapture(headers: Headers, onCapture: (t: Gatewa
   let buffer = "";
   let dirty = Object.keys(telemetry).length > 0;
 
+  const merge = (next: GatewayTelemetry) => {
+    const merged = mergeTelemetry(telemetry, next);
+    if (!telemetryChanged(telemetry, merged)) return;
+    telemetry = merged;
+    dirty = true;
+  };
+
   const processLine = (rawLine: string) => {
     const line = rawLine.trimEnd();
     const commentHeaders = parseSseCommentHeaders(line);
     if (commentHeaders) {
-      telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(commentHeaders, {}));
-      dirty = true;
+      merge(parseGatewayTelemetry(commentHeaders, {}));
       return;
     }
     if (!line.startsWith("data:")) return;
     const data = line.slice(5).trim();
     if (!data || data === "[DONE]") return;
     try {
-      telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(headers, JSON.parse(data)));
-      dirty = true;
+      merge(parseGatewayTelemetry(headers, JSON.parse(data)));
     } catch {
       // Ignore partial or non-JSON SSE payloads. The stream must pass through untouched.
     }
@@ -157,20 +166,35 @@ function createStreamingTelemetryCapture(headers: Headers, onCapture: (t: Gatewa
   const emit = () => {
     if (!dirty) return;
     dirty = false;
-    onCapture(telemetry);
+    try {
+      onCapture(telemetry);
+    } catch {
+      // Telemetry must never interrupt the host's response stream.
+    }
+  };
+
+  const drain = (final: boolean) => {
+    let index = 0;
+    while (index < buffer.length) {
+      const cr = buffer.indexOf("\r", index);
+      const lf = buffer.indexOf("\n", index);
+      const newlineIndex = cr === -1 ? lf : lf === -1 ? cr : Math.min(cr, lf);
+      if (newlineIndex === -1) break;
+      if (buffer[newlineIndex] === "\r" && newlineIndex + 1 === buffer.length && !final) break;
+      processLine(buffer.slice(index, newlineIndex));
+      index = newlineIndex + (buffer[newlineIndex] === "\r" && buffer[newlineIndex + 1] === "\n" ? 2 : 1);
+    }
+    buffer = buffer.slice(index);
   };
 
   return {
     push(text: string) {
       buffer += text;
-      let newlineIndex: number;
-      while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
-        processLine(buffer.slice(0, newlineIndex));
-        buffer = buffer.slice(newlineIndex + 1);
-      }
+      drain(false);
       emit();
     },
     finish() {
+      drain(true);
       if (buffer) processLine(buffer);
       buffer = "";
       emit();

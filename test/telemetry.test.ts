@@ -115,6 +115,25 @@ test("fetch wrapper captures header-only streaming telemetry", async () => {
   assert.deepEqual(seen, [{ tokensPerSecond: 12.5, model: "header-model" }]);
 });
 
+test("fetch wrapper parses CR-only SSE usage across chunk boundaries", async () => {
+  const seen: Array<{ tokensPerSecond?: number }> = [];
+  const encoder = new TextEncoder();
+  const source = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode("data: {\"usage\":{\"tokens_per_second\":15.5}}\r"));
+      controller.enqueue(encoder.encode("\rdata: [DONE]\r"));
+      controller.close();
+    },
+  });
+  const inner = (async () => new Response(source, { headers: { "content-type": "text/event-stream" } })) as typeof fetch;
+  const wrapped = wrapFetchCaptureTelemetry(inner, (t) => { seen.push(t); }, { serverUrl: "https://omniroute.example" });
+
+  const response = await wrapped("https://omniroute.example/v1/chat/completions");
+  await response.text();
+
+  assert.equal(seen.at(-1)?.tokensPerSecond, 15.5);
+});
+
 test("fetch wrapper captures streaming usage when the consumer cancels before flush", async () => {
   const seen: Array<{ tokensPerSecond?: number; model?: string }> = [];
   const sse = [
