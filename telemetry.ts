@@ -125,25 +125,81 @@ function parseSseCommentHeaders(line: string): Headers | undefined {
   return new Headers({ [match[1]]: match[2].trim() });
 }
 
-function parseStreamingTelemetry(headers: Headers, text: string): GatewayTelemetry {
+function telemetryChanged(before: GatewayTelemetry, after: GatewayTelemetry): boolean {
+  return Object.keys(after).some((key) => before[key as keyof GatewayTelemetry] !== after[key as keyof GatewayTelemetry]);
+}
+
+type StreamingTelemetryCapture = {
+  push(text: string): void;
+  finish(): void;
+};
+
+function createStreamingTelemetryCapture(headers: Headers, onCapture: (t: GatewayTelemetry) => void): StreamingTelemetryCapture {
   let telemetry = parseGatewayTelemetry(headers, {});
-  for (const rawLine of text.split(/\r?\n/)) {
+  let buffer = "";
+  let dirty = Object.keys(telemetry).length > 0;
+
+  const merge = (next: GatewayTelemetry) => {
+    const merged = mergeTelemetry(telemetry, next);
+    if (!telemetryChanged(telemetry, merged)) return;
+    telemetry = merged;
+    dirty = true;
+  };
+
+  const processLine = (rawLine: string) => {
     const line = rawLine.trimEnd();
     const commentHeaders = parseSseCommentHeaders(line);
     if (commentHeaders) {
-      telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(commentHeaders, {}));
-      continue;
+      merge(parseGatewayTelemetry(commentHeaders, {}));
+      return;
     }
-    if (!line.startsWith("data:")) continue;
+    if (!line.startsWith("data:")) return;
     const data = line.slice(5).trim();
-    if (!data || data === "[DONE]") continue;
+    if (!data || data === "[DONE]") return;
     try {
-      telemetry = mergeTelemetry(telemetry, parseGatewayTelemetry(headers, JSON.parse(data)));
+      merge(parseGatewayTelemetry(headers, JSON.parse(data)));
     } catch {
       // Ignore partial or non-JSON SSE payloads. The stream must pass through untouched.
     }
-  }
-  return telemetry;
+  };
+
+  const emit = () => {
+    if (!dirty) return;
+    dirty = false;
+    try {
+      onCapture(telemetry);
+    } catch {
+      // Telemetry must never interrupt the host's response stream.
+    }
+  };
+
+  const drain = (final: boolean) => {
+    let index = 0;
+    while (index < buffer.length) {
+      const cr = buffer.indexOf("\r", index);
+      const lf = buffer.indexOf("\n", index);
+      const newlineIndex = cr === -1 ? lf : lf === -1 ? cr : Math.min(cr, lf);
+      if (newlineIndex === -1) break;
+      if (buffer[newlineIndex] === "\r" && newlineIndex + 1 === buffer.length && !final) break;
+      processLine(buffer.slice(index, newlineIndex));
+      index = newlineIndex + (buffer[newlineIndex] === "\r" && buffer[newlineIndex + 1] === "\n" ? 2 : 1);
+    }
+    buffer = buffer.slice(index);
+  };
+
+  return {
+    push(text: string) {
+      buffer += text;
+      drain(false);
+      emit();
+    },
+    finish() {
+      drain(true);
+      if (buffer) processLine(buffer);
+      buffer = "";
+      emit();
+    },
+  };
 }
 
 function captureStreamingResponse(response: Response, onCapture: (t: GatewayTelemetry) => void): Response {
@@ -153,15 +209,15 @@ function captureStreamingResponse(response: Response, onCapture: (t: GatewayTele
   }
 
   const decoder = new TextDecoder();
-  let text = "";
+  const capture = createStreamingTelemetryCapture(response.headers, onCapture);
   const stream = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
-      text += decoder.decode(chunk, { stream: true });
+      capture.push(decoder.decode(chunk, { stream: true }));
       controller.enqueue(chunk);
     },
     flush() {
-      text += decoder.decode();
-      onCapture(parseStreamingTelemetry(response.headers, text));
+      capture.push(decoder.decode());
+      capture.finish();
     },
   }));
 

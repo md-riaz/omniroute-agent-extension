@@ -97,3 +97,69 @@ test("fetch wrapper captures final streaming usage without consuming the stream"
   assert.equal(seen[0].tokensIn, 3);
   assert.equal(seen[0].tokensOut, 2);
 });
+
+test("fetch wrapper captures header-only streaming telemetry", async () => {
+  const seen: Array<{ tokensPerSecond?: number; model?: string }> = [];
+  const inner = (async () => new Response("data: [DONE]\n\n", {
+    headers: {
+      "content-type": "text/event-stream",
+      "x-omniroute-tokens-per-second": "12.5",
+      "x-omniroute-model": "header-model",
+    },
+  })) as typeof fetch;
+  const wrapped = wrapFetchCaptureTelemetry(inner, (t) => { seen.push(t); }, { serverUrl: "https://omniroute.example" });
+
+  const response = await wrapped("https://omniroute.example/v1/chat/completions");
+  await response.text();
+
+  assert.deepEqual(seen, [{ tokensPerSecond: 12.5, model: "header-model" }]);
+});
+
+test("fetch wrapper parses CR-only SSE usage across chunk boundaries", async () => {
+  const seen: Array<{ tokensPerSecond?: number }> = [];
+  const encoder = new TextEncoder();
+  const source = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode("data: {\"usage\":{\"tokens_per_second\":15.5}}\r"));
+      controller.enqueue(encoder.encode("\rdata: [DONE]\r"));
+      controller.close();
+    },
+  });
+  const inner = (async () => new Response(source, { headers: { "content-type": "text/event-stream" } })) as typeof fetch;
+  const wrapped = wrapFetchCaptureTelemetry(inner, (t) => { seen.push(t); }, { serverUrl: "https://omniroute.example" });
+
+  const response = await wrapped("https://omniroute.example/v1/chat/completions");
+  await response.text();
+
+  assert.equal(seen.at(-1)?.tokensPerSecond, 15.5);
+});
+
+test("fetch wrapper captures streaming usage when the consumer cancels before flush", async () => {
+  const seen: Array<{ tokensPerSecond?: number; model?: string }> = [];
+  const sse = [
+    "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+    "data: {\"model\":\"stream-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5,\"tokens_per_second\":19.75}}\n\n",
+    "data: [DONE]\n\n",
+  ].join("");
+  const encoder = new TextEncoder();
+  const source = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(encoder.encode(sse)); },
+  });
+  const inner = (async () => new Response(source, { headers: { "content-type": "text/event-stream" } })) as typeof fetch;
+  const wrapped = wrapFetchCaptureTelemetry(inner, (t) => { seen.push(t); }, { serverUrl: "https://omniroute.example" });
+
+  const res = await wrapped("https://omniroute.example/v1/chat/completions");
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  while (!text.includes("data: [DONE]")) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+  }
+  await reader.cancel();
+
+  assert.ok(seen.length > 0, "expected telemetry capture before the consumer cancels");
+  assert.equal(seen.at(-1)?.tokensPerSecond, 19.75);
+  assert.equal(seen.at(-1)?.model, "stream-model");
+});

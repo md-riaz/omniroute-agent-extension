@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Capture streaming `usage.tokens_per_second` as each SSE chunk arrives, so a client that stops at `data: [DONE]` still reports OmniRoute tok/s.
 - Use one Pi-compatible entrypoint that selects Prime's agent home through `PRIME_AGENT_CODING_AGENT_DIR`, otherwise Pi's. This prevents duplicate OmniRoute tools and commands while preserving direct GitHub installation for Pi, OMP, and Prime Agent.
 
 ## 3.2.3
